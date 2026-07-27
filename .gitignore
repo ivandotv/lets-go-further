@@ -1,0 +1,28 @@
+# Compiled binaries
+/bin/
+
+# SQLite database files.
+#
+# The -wal and -shm files are created by WAL journalling mode: -wal holds
+# committed-but-not-yet-checkpointed transactions, -shm is a shared-memory
+# index into it. Both are transient and must never be committed — a .db without
+# its matching -wal can be missing recent writes.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Test and coverage output
+*.out
+coverage.html
+
+# Environment files (these hold SMTP credentials)
+.env
+.envrc
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp

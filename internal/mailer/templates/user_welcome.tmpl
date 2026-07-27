@@ -1,0 +1,49 @@
+{{/*
+    Each of the three named templates below is executed separately by
+    Mailer.Send. The data passed in is a map with "userID", "activationToken"
+    and "name" keys — see cmd/api/users.go.
+*/}}
+
+{{define "subject"}}Welcome to Greenlight!{{end}}
+
+{{define "plainBody"}}
+Hi {{.name}},
+
+Thanks for signing up for a Greenlight account. We're excited to have you on board!
+
+For future reference, your user ID number is {{.userID}}.
+
+Please send a request to the `PUT /v1/users/activated` endpoint with the
+following JSON body to activate your account:
+
+{"token": "{{.activationToken}}"}
+
+Please note that this is a one-time use token and it will expire in 3 days.
+
+Thanks,
+
+The Greenlight Team
+{{end}}
+
+{{define "htmlBody"}}
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  </head>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.5;">
+    <p>Hi {{.name}},</p>
+    <p>Thanks for signing up for a Greenlight account. We're excited to have you on board!</p>
+    <p>For future reference, your user ID number is {{.userID}}.</p>
+    <p>
+      Please send a request to the <code>PUT /v1/users/activated</code> endpoint with the
+      following JSON body to activate your account:
+    </p>
+    <pre style="background:#f4f4f4; padding:12px; border-radius:4px;"><code>{"token": "{{.activationToken}}"}</code></pre>
+    <p>Please note that this is a one-time use token and it will expire in 3 days.</p>
+    <p>Thanks,</p>
+    <p>The Greenlight Team</p>
+  </body>
+</html>
+{{end}}
