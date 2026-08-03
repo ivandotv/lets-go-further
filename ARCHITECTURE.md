@@ -1,0 +1,230 @@
+# Architecture
+
+A simplified map of how Greenlight is put together. For deep-dive rationale
+(every SQLite trade-off, every design decision) see [README.md](README.md) —
+this file is the 30,000-foot view.
+
+---
+
+## 1. What this is
+
+A JSON API for a movie database. One Go binary, one SQLite file. No external
+services required to run it — no Postgres, no Docker, no message queue.
+
+```
+                        ┌─────────────────────┐
+   HTTP request  ─────► │   greenlight binary   │ ─────► greenlight.db (SQLite file)
+                        └─────────────────────┘
+```
+
+---
+
+## 2. The three layers
+
+The whole codebase is three layers, each with one job. A request always
+flows top to bottom; nothing skips a layer.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  HTTP layer            cmd/api/                                │
+│  "translate HTTP ⇄ Go"                                          │
+│  routing, middleware, request/response JSON, auth enforcement   │
+└───────────────────────────┬──────────────────────────────────┘
+                             │  calls methods on app.models.*
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Model layer            internal/data/                          │
+│  "domain types + SQL"                                           │
+│  Movie, User, Token, Permissions — knows nothing about HTTP     │
+└───────────────────────────┬──────────────────────────────────┘
+                             │  database/sql calls
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Storage                internal/db/  +  migrations/            │
+│  opens the SQLite file, applies schema migrations on boot       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+Two small supporting packages sit beside these: `internal/validator` (turns
+bad input into field-level error messages) and `internal/mailer` (sends the
+activation email).
+
+**Why this separation matters:** the model layer never imports `net/http`,
+and handlers never write raw SQL. You can unit-test business rules without a
+server, and swap out the transport (HTTP today) without touching the data
+layer.
+
+---
+
+## 3. Directory map
+
+```
+cmd/api/       The HTTP server — everything transport-specific.
+  main.go        wires everything together: config, logger, db, models, mailer
+  routes.go      the URL → handler table, and the middleware chain
+  middleware.go  8 middlewares (auth, rate limiting, CORS, panic recovery...)
+  *.go           one file per resource: healthcheck, movies, users, tokens
+  helpers.go     shared JSON read/write helpers
+  errors.go      every error response shape
+
+cmd/seed/      A CLI that creates a demo user + sample movies (not from the book).
+
+internal/      Go-enforced private code — nothing outside this module can import it.
+  data/          domain types (Movie, User, Token...) and their SQL
+  db/            opens the SQLite connection pool, runs migrations
+  mailer/        SMTP client + embedded email templates
+  validator/     generic "collect field errors into a map" helper
+  testutil/      spins up a fresh migrated test database per test
+
+migrations/    Versioned .sql schema files, embedded into the binary.
+```
+
+---
+
+## 4. Request lifecycle
+
+Every request passes through a fixed middleware chain before it reaches a
+handler. The order is deliberate (see comments in `routes.go`):
+
+```
+  request
+     │
+     ▼
+  metrics          count it, start timing it
+     │
+     ▼
+  recoverPanic     turn any panic below into a clean 500 instead of a crash
+     │
+     ▼
+  secureHeaders    X-Frame-Options, CSP, etc.
+     │
+     ▼
+  enableCORS       origin allow-list (runs BEFORE rateLimit, so a rejected
+     │              request still gets its CORS headers)
+     ▼
+  rateLimit        per-IP token bucket → 429 if exhausted
+     │
+     ▼
+  authenticate     Bearer token → *data.User in the request context
+     │              (or the "anonymous" user — this step never rejects)
+     ▼
+  logRequest       log method, URI, status, duration once the handler is done
+     │
+     ▼
+  router (httprouter)   matches the URL, extracts path params like :id
+     │
+     ▼
+  requirePermission("movies:read")     ─┐
+     └─ requireActivatedUser            │  these three compose: asking for a
+          └─ requireAuthenticatedUser  ─┘  permission automatically requires
+                                            an activated, authenticated user
+     │
+     ▼
+  handler          e.g. showMovieHandler: parse input → call the model →
+     │              write JSON response
+     ▼
+  model            e.g. MovieModel.Get: run SQL, scan rows into Go structs
+     │
+     ▼
+  SQLite
+```
+
+Handlers are all methods on `*application` (defined in `main.go`), which
+holds the logger, config, models, and mailer. There are no global variables —
+that's what lets each test build a completely independent app instance.
+
+---
+
+## 5. Data model
+
+```
+┌────────────┐        ┌──────────────────┐        ┌─────────────┐
+│   users    │───────►│ users_permissions │◄───────│ permissions │
+│            │  1:N   │  (join table)     │  N:1   │             │
+│ id         │        │ user_id           │        │ id          │
+│ name       │        │ permission_id     │        │ code        │
+│ email      │        └──────────────────┘        └─────────────┘
+│ password_  │                                     e.g. "movies:read",
+│  hash      │                                          "movies:write"
+│ activated  │
+│ version    │
+└─────┬──────┘
+      │ 1:N (ON DELETE CASCADE)
+      ▼
+┌────────────┐
+│   tokens   │   hash    (SHA-256 of the plaintext token — plaintext is
+│            │            never stored)
+│ user_id    │   scope   ("activation" or "authentication" — an emailed
+│ expiry     │            activation token can't be replayed as a login)
+│ scope      │
+└────────────┘
+
+┌────────────┐
+│   movies   │   standalone — no foreign keys to users
+│            │
+│ id         │   genres is a JSON array stored as TEXT (SQLite has no
+│ title      │   array type); internal/data/genres.go makes it transparent
+│ year       │   at the call sites via the Valuer/Scanner interfaces
+│ runtime    │
+│ genres     │   version powers optimistic locking: every UPDATE checks
+│ version    │   `WHERE id = ? AND version = ?`, so a stale write affects
+└────────────┘   zero rows and comes back as 409 Conflict instead of
+                  silently overwriting someone else's change.
+```
+
+---
+
+## 6. Auth & permissions, end to end
+
+1. `POST /v1/users` — register. A row is created in `users` (unactivated),
+   and an activation token (scope `activation`) is emailed — or logged, if no
+   SMTP host is configured.
+2. `PUT /v1/users/activated` — the client sends the token back; it's hashed
+   and matched against `tokens`, the user is flipped to `activated`, and the
+   token is deleted (single-use).
+3. `POST /v1/tokens/authentication` — email + password in, a new token
+   (scope `authentication`) out. This is the bearer token used on every
+   subsequent request.
+4. Every request — `Authorization: Bearer <token>` is hashed and looked up
+   in `tokens` by the `authenticate` middleware, which resolves it to a
+   `*data.User` and stashes it on the request context.
+5. Route-level guards (`requirePermission`, `requireActivatedUser`,
+   `requireAuthenticatedUser`) read that user back out of the context and
+   check `activated` / the `users_permissions` join table before letting the
+   handler run.
+
+---
+
+## 7. Boot sequence (`cmd/api/main.go: run()`)
+
+```
+parse flags → build logger → open SQLite (internal/db.OpenDB)
+   → apply pending migrations (internal/db.MigrateUp)
+   → register expvar metrics
+   → build *application{config, logger, models, mailer}
+   → app.serve()   (HTTP server with graceful shutdown)
+```
+
+Nothing here can silently fail: `run()` returns an `error`, and `main()` just
+prints it and exits — so every deferred cleanup (like closing the database)
+still runs on the way out.
+
+---
+
+## 8. A few load-bearing decisions
+
+- **Dependency injection via a struct, not globals.** Every handler is a
+  method on `*application`. Lets tests build a fully isolated app per test.
+- **The model layer only ever returns sentinel errors** (`ErrRecordNotFound`,
+  `ErrEditConflict`) upward — handlers translate those into HTTP status
+  codes. SQL details never leak past `internal/data`.
+- **Every test gets its own SQLite file** in `t.TempDir()`, migrated fresh.
+  No mocking the database, no shared fixtures, safe to run in parallel.
+- **Background work (sending email) gets its own panic recovery.** The
+  `recoverPanic` middleware only protects the request's own goroutine — a
+  panic in a spawned goroutine kills the whole process otherwise, so
+  `app.background()` wraps every background task in its own `recover`.
+
+For the full reasoning behind each of these — and the complete list of
+places SQLite forced a change from the book Postgres schema — see
+[README.md](README.md).
