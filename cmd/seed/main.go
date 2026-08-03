@@ -12,6 +12,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 
 	"greenlight/internal/data"
 	"greenlight/internal/db"
+	"greenlight/internal/validator"
 )
 
 func main() {
@@ -33,7 +35,26 @@ func run() error {
 	dsn := flag.String("db-dsn", "greenlight.db", "SQLite database file path")
 	email := flag.String("email", "demo@example.com", "Email address for the demo user")
 	password := flag.String("password", "pa55word1234", "Password for the demo user")
+
+	// Fixed rather than randomly generated, so re-running this command — or
+	// just re-reading the README — always gets you the same value. That means
+	// tools like the Bruno collection can hardcode it and skip the
+	// copy-a-fresh-token-in dance entirely.
+	//
+	// This is safe ONLY because it's confined to this local dev-seeding tool:
+	// the real API (cmd/api) never issues or accepts a token by any means
+	// other than TokenModel.New's crypto/rand generation. Nobody else has your
+	// SQLite file, so a known plaintext is no more sensitive than a well-known
+	// local "postgres/postgres" dev credential.
+	fixedToken := flag.String("token", "GREENLIGHT0000000000000000",
+		"Fixed plaintext authentication token to seed for the demo user (must be 26 characters)")
+
 	flag.Parse()
+
+	v := validator.New()
+	if data.ValidateTokenPlaintext(v, *fixedToken); !v.Valid() {
+		return fmt.Errorf("invalid -token: %s", v.Errors["token"])
+	}
 
 	database, err := db.OpenDB(db.Config{
 		DSN:          *dsn,
@@ -138,9 +159,29 @@ func run() error {
 		fmt.Printf("inserted %d sample movies\n", len(movies))
 	}
 
-	// ── An authentication token to use straight away ─────────────────────────
-	token, err := models.Tokens.New(user.ID, 24*time.Hour, data.ScopeAuthentication)
-	if err != nil {
+	// ── A fixed authentication token to use straight away ────────────────────
+	//
+	// Burn any tokens from a previous seed run first, so re-running this
+	// command doesn't leave old rows (fixed or, from before this existed,
+	// randomly generated) sitting in the table alongside the new one.
+	if err := models.Tokens.DeleteAllForUser(data.ScopeAuthentication, user.ID); err != nil {
+		return err
+	}
+
+	hash := sha256.Sum256([]byte(*fixedToken))
+
+	token := &data.Token{
+		Plaintext: *fixedToken,
+		Hash:      hash[:],
+		UserID:    user.ID,
+		// Long enough that it never practically expires in local dev. There's
+		// no security cost to a long TTL here — see the comment on the -token
+		// flag above for why this token being fixed and known is fine at all.
+		Expiry: time.Now().AddDate(100, 0, 0),
+		Scope:  data.ScopeAuthentication,
+	}
+
+	if err := models.Tokens.Insert(token); err != nil {
 		return err
 	}
 
@@ -150,11 +191,12 @@ Demo user ready.
   email:    %s
   password: %s
 
-Authentication token (valid 24h):
+Authentication token (fixed — same every time, doesn't expire):
 
   %s
 
-Try it:
+Already set as the default in bruno/environments/Local.bru — no copying
+required. Or try it directly:
 
   curl -H "Authorization: Bearer %s" localhost:4000/v1/movies
 

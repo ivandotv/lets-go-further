@@ -44,10 +44,10 @@ make run/seed
 make run/api
 ```
 
-`make run/seed` prints an authentication token. In another terminal:
+`make run/seed` prints an authentication token — it's fixed (`GREENLIGHT0000000000000000` by default, override with `-token`), so it's the same every time rather than something you copy out of the output each run. In another terminal:
 
 ```bash
-export TOKEN=<the token it printed>
+export TOKEN=GREENLIGHT0000000000000000
 
 # List movies
 curl -H "Authorization: Bearer $TOKEN" localhost:4000/v1/movies
@@ -97,7 +97,9 @@ desktop app, then select the `Local` environment — it holds `baseUrl` and
 **Fast path**, using the seeded demo user (already has both `movies:read` and
 `movies:write`):
 
-1. `make run/seed` → copy the printed token into `Local`'s `token` variable.
+1. `make run/seed` — the demo user's token is fixed
+   (`GREENLIGHT0000000000000000`), so `Local`'s `token` already matches it.
+   No copying required, even across reseeds.
 2. `make run/api`
 3. Send any request in the collection.
 
