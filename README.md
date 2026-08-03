@@ -17,15 +17,16 @@ architecture and every place where SQLite forced a change from the book.
 ## Table of contents
 
 1. [Quickstart](#quickstart)
-2. [API endpoints](#api-endpoints)
-3. [Project layout](#project-layout)
-4. [How a request flows through the app](#how-a-request-flows-through-the-app)
-5. [PostgreSQL → SQLite: every difference](#postgresql--sqlite-every-difference)
-6. [The packages, and why each one](#the-packages-and-why-each-one)
-7. [Design decisions worth understanding](#design-decisions-worth-understanding)
-8. [Testing](#testing)
-9. [Where this deviates from the books](#where-this-deviates-from-the-books)
-10. [Going further from here](#going-further-from-here)
+2. [Trying it in Bruno](#trying-it-in-bruno)
+3. [API endpoints](#api-endpoints)
+4. [Project layout](#project-layout)
+5. [How a request flows through the app](#how-a-request-flows-through-the-app)
+6. [PostgreSQL → SQLite: every difference](#postgresql--sqlite-every-difference)
+7. [The packages, and why each one](#the-packages-and-why-each-one)
+8. [Design decisions worth understanding](#design-decisions-worth-understanding)
+9. [Testing](#testing)
+10. [Where this deviates from the books](#where-this-deviates-from-the-books)
+11. [Going further from here](#going-further-from-here)
 
 ---
 
@@ -82,6 +83,41 @@ curl -X POST localhost:4000/v1/tokens/authentication \
 ```
 
 Run `make help` to see every available target.
+
+---
+
+## Trying it in Bruno
+
+A [Bruno](https://www.usebruno.com/) collection lives in `bruno/`, with one
+request per endpoint in the table below. Open the `bruno/` folder in the
+Bruno VS Code extension (recommended in `.vscode/extensions.json`) or the
+desktop app, then select the `Local` environment — it holds `baseUrl` and
+`token`.
+
+**Fast path**, using the seeded demo user (already has both `movies:read` and
+`movies:write`):
+
+1. `make run/seed` → copy the printed token into `Local`'s `token` variable.
+2. `make run/api`
+3. Send any request in the collection.
+
+**Real signup flow**, exercising registration/activation/login instead of the
+seeded user:
+
+1. Send **Users → Register User** (202). The activation email is logged to
+   the `make run/api` terminal instead of sent — copy the token from there.
+2. Paste it into **Users → Activate User**'s body and send (200).
+3. Send **Tokens → Authenticate** with the same credentials (201), and copy
+   `authentication_token.token` from the response into `Local`'s `token`.
+
+Two things that look like bugs but aren't:
+
+- **A self-registered user only gets `movies:read`** (see
+  `registerUserHandler` in `cmd/api/users.go`) — POST/PATCH/DELETE on movies
+  will 403 for that user. Only the seeded demo user can write.
+- **The rate limiter is 2 req/s with a burst of 4** — running the whole
+  collection back-to-back will 429 partway through. That's the limiter
+  working as intended, not a broken request.
 
 ---
 

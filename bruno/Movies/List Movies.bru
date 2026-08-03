@@ -1,0 +1,21 @@
+meta {
+  name: List Movies
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/v1/movies
+}
+
+params:query {
+  title:
+  genres:
+  page: 1
+  page_size: 20
+  sort: id
+}
+
+headers {
+  Authorization: Bearer {{token}}
+}

@@ -1,0 +1,23 @@
+meta {
+  name: Create Movie
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/v1/movies
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+  {
+    "title": "Moana",
+    "year": 2016,
+    "runtime": "107 mins",
+    "genres": ["animation", "adventure"]
+  }
+}

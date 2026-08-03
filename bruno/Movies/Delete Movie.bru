@@ -1,0 +1,17 @@
+meta {
+  name: Delete Movie
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{baseUrl}}/v1/movies/:id
+}
+
+params:path {
+  id: 1
+}
+
+headers {
+  Authorization: Bearer {{token}}
+}
