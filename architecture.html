@@ -480,7 +480,7 @@
     <section class="doc" id="s3">
       <div class="sec-head"><span class="sec-num">§3</span><h2>Directory map</h2></div>
       <div class="prose">
-        <p>One file per resource in the HTTP layer, one package per concern underneath.</p>
+        <p>One file per resource in the HTTP layer, one package per concern underneath. Two conventions decide where anything lives: <code>cmd/</code> vs. <code>internal/</code> is standard Go project layout, and the packages inside <code>internal/</code> mirror the three layers from <a href="#s2">§2</a>.</p>
       </div>
       <div class="tree">
         <div class="tree-row"><div class="tree-path">cmd/api/</div><div class="tree-desc">The HTTP server — everything transport-specific</div></div>
@@ -491,12 +491,16 @@
         <div class="tree-row sub2"><div class="tree-path">helpers.go / errors.go</div><div class="tree-desc">shared JSON helpers · every error response shape</div></div>
         <div class="tree-row"><div class="tree-path">cmd/seed/</div><div class="tree-desc">CLI that creates a demo user + sample movies</div></div>
         <div class="tree-row"><div class="tree-path">internal/</div><div class="tree-desc">Go-enforced private code — nothing outside the module can import it</div></div>
-        <div class="tree-row sub"><div class="tree-path">data/</div><div class="tree-desc">domain types (Movie, User, Token…) and their SQL</div></div>
-        <div class="tree-row sub"><div class="tree-path">db/</div><div class="tree-desc">opens the SQLite connection pool, runs migrations</div></div>
+        <div class="tree-row sub"><div class="tree-path">data/</div><div class="tree-desc">model layer — domain types (Movie, User, Token…) and their SQL</div></div>
+        <div class="tree-row sub"><div class="tree-path">db/</div><div class="tree-desc">storage layer — opens the SQLite connection pool, runs migrations</div></div>
         <div class="tree-row sub"><div class="tree-path">mailer/</div><div class="tree-desc">SMTP client + embedded email templates</div></div>
         <div class="tree-row sub"><div class="tree-path">validator/</div><div class="tree-desc">generic "collect field errors into a map" helper</div></div>
         <div class="tree-row sub"><div class="tree-path">testutil/</div><div class="tree-desc">spins up a fresh migrated test database per test</div></div>
         <div class="tree-row"><div class="tree-path">migrations/</div><div class="tree-desc">Versioned .sql schema files, embedded into the binary</div></div>
+      </div>
+      <div class="prose" style="margin-top:1.5rem;">
+        <p><strong>Why <code>cmd/</code> and <code>internal/</code>:</strong> this split isn't project-specific — it's standard Go project layout. <code>cmd/</code> holds <code>main</code> packages, one subdirectory per binary (<code>cmd/api</code> the server, <code>cmd/seed</code> the demo-data command). <code>internal/</code> is special to the toolchain itself: a package rooted under an <code>internal/</code> directory can only be imported by code rooted at that directory's parent — the compiler enforces it, not a convention people can ignore. That's why <code>data</code>, <code>db</code>, <code>mailer</code>, <code>validator</code>, and <code>testutil</code> all live there: none of them are meant to be imported from outside this module.</p>
+        <p><strong>Why <code>data/</code> and <code>db/</code> are split:</strong> keeping the model layer and storage layer as separate packages is what makes it physically impossible for <code>internal/data</code> to accidentally depend on <code>net/http</code>, and what lets <code>internal/db</code> be swapped or exercised in isolation (via <code>internal/testutil</code>) without touching a single query. <code>mailer</code>, <code>validator</code>, and <code>testutil</code> don't fit either layer — they're cross-cutting support code — but still need the same compiler-enforced privacy, so they sit beside <code>data</code>/<code>db</code> rather than in their own top-level directory.</p>
       </div>
     </section>
 

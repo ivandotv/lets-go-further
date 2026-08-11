@@ -79,6 +79,28 @@ internal/      Go-enforced private code — nothing outside this module can impo
 migrations/    Versioned .sql schema files, embedded into the binary.
 ```
 
+**Why laid out this way:**
+
+- **`cmd/` vs `internal/` is standard Go project convention, not something
+  invented here.** `cmd/` holds `main` packages, one subdirectory per binary
+  (`cmd/api` for the server, `cmd/seed` for the demo-data command).
+  `internal/` is special to the Go toolchain itself: a package rooted under an
+  `internal/` directory can only be imported by code rooted at that
+  directory's parent. The compiler enforces this — it isn't a lint rule
+  someone can ignore. That gives the module a real private/public boundary,
+  which is why `data`, `db`, `mailer`, `validator`, and `testutil` all live
+  there: none of them are meant to be imported by anything outside this repo.
+- **Inside `internal/`, the split mirrors the three layers from §2.**
+  `internal/data` is the model layer and `internal/db` is storage — keeping
+  them as separate packages is what makes it physically impossible for
+  `internal/data` to accidentally depend on `net/http`, and it's what lets
+  `internal/db` be swapped or tested (via `internal/testutil`) without
+  touching a single query.
+- **`mailer`, `validator`, and `testutil` don't fit the three layers** — they're
+  cross-cutting support code — but they still need the same
+  compiler-enforced privacy, so they sit beside `data`/`db` under `internal/`
+  rather than in their own top-level directory.
+
 ---
 
 ## 4. Request lifecycle
