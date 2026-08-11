@@ -74,7 +74,9 @@ internal/      Go-enforced private code — nothing outside this module can impo
   db/            opens the SQLite connection pool, runs migrations
   mailer/        SMTP client + embedded email templates
   validator/     generic "collect field errors into a map" helper
+  assert/        tiny generic assertion helpers used by every test
   testutil/      spins up a fresh migrated test database per test
+                 (doc.go is the guide to the whole test suite)
 
 migrations/    Versioned .sql schema files, embedded into the binary.
 ```
@@ -246,6 +248,59 @@ still runs on the way out.
   `recoverPanic` middleware only protects the request's own goroutine — a
   panic in a spawned goroutine kills the whole process otherwise, so
   `app.background()` wraps every background task in its own `recover`.
+
+---
+
+## 9. How it's tested
+
+One external test dependency (`github.com/google/go-cmp`); everything else is
+the standard library. The full guide — commands, conventions, and the Go
+testing machinery involved — lives in
+[`internal/testutil/doc.go`](internal/testutil/doc.go), readable with
+`go doc greenlight/internal/testutil`.
+
+```
+make test        go test -race ./...        the everyday command
+make test/short  skips database-backed tests
+make test/cover  coverage (-coverpkg=./...), opens an HTML report
+make test/fuzz   30s of fuzzing per package
+make test/bench  benchmarks with allocation counts
+make audit       tidy + fmt + vet + test -race
+```
+
+**Layers of the suite, roughly outside-in:**
+
+| Layer | Where | What it proves |
+|---|---|---|
+| End-to-end HTTP | `cmd/api/*_test.go` | Real `httptest.Server`, real DB, real middleware chain. Only outbound email is mocked. |
+| Graceful shutdown | `cmd/api/server_test.go` | `serve()` under a real SIGTERM: in-flight requests and background email both complete before it returns. |
+| Model layer | `internal/data/*_test.go` | The SQL itself, against a real schema. |
+| Concurrency | `internal/data/concurrency_test.go` | `busy_timeout` under contention, WAL readers during writes, and that exactly one of two racing updates wins. |
+| Connection setup | `internal/db/db_test.go` | Every PRAGMA reaches *every* pooled connection, and migrations are idempotent across restarts. |
+| Email | `internal/mailer/mailer_test.go` | Template rendering and MIME structure, asserted on the bytes sent to a fake in-process SMTP server. |
+| Pure units | `internal/validator`, parts of `internal/data` | No I/O; microseconds. |
+| Fuzzing | 4 targets | The hand-written parsers: `Runtime.UnmarshalJSON`, `Genres.Scan`, `readJSON`, and the email regexp. |
+| Benchmarks | `*/bench_test.go` | Baselines for bcrypt cost, `GetAll` with filters, JSON encoding, and the middleware chain. |
+
+**Two things worth knowing:**
+
+- **No database mocks, anywhere.** SQLite is an embedded library, so a "real
+  database" is a temp file that costs about a millisecond. Since the thing most
+  likely to be wrong in a model layer is the SQL, and a mock cannot check SQL,
+  this is a far better trade than it would be against Postgres.
+- **`Mailer` is an interface for exactly one reason.** The book stores a
+  concrete `*mailer.Mailer` on the application; this uses a one-method interface
+  so tests can inject a recorder and read the activation token out of it. That
+  single deviation is what makes the whole registration → activation flow
+  testable. The real implementation is then covered separately in
+  `internal/mailer`.
+
+Coverage after the suite as it stands: `internal/validator` 100%,
+`internal/mailer` 93%, `internal/data` 91%, `internal/db` 84%, `cmd/api` 81%,
+`cmd/seed` 73% — 84% across the module. The bulk of what's left is `main()`,
+`run()`, and other process wiring.
+
+---
 
 For the full reasoning behind each of these — and the complete list of
 places SQLite forced a change from the book Postgres schema — see

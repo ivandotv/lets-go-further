@@ -3,8 +3,8 @@
 // This comes from the FIRST book ("Let's Go", chapter 13). Go deliberately has
 // no assertion library in its standard library — the official position is that
 // `if got != want { t.Errorf(...) }` is clear enough. That's true, but it gets
-// repetitive, and these three generic helpers remove the repetition without
-// pulling in a dependency like testify.
+// repetitive, and these generic helpers remove the repetition without pulling
+// in a dependency like testify.
 //
 // Every helper calls t.Helper(), which is the important bit: it tells the
 // testing package to report failures against the CALLER's line number rather
@@ -15,6 +15,8 @@ package assert
 import (
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // Equal fails the test if got != want.
@@ -40,6 +42,32 @@ func StringContains(t *testing.T, got, want string) {
 
 	if !strings.Contains(got, want) {
 		t.Errorf("got: %q; expected to contain: %q", got, want)
+	}
+}
+
+// DeepEqual fails the test if got and want differ, printing a readable diff.
+//
+// Equal above is constrained to `comparable`, which rules out exactly the types
+// this codebase compares most often: data.Genres (a slice), []*data.Movie, and
+// the validator's map[string]string of field errors. Before this helper existed
+// tests had to compare those field by field, which is noisy and reports "got 3;
+// want 4" rather than showing you WHICH element differs.
+//
+// go-cmp is the one test dependency this project takes. It's what the Go team
+// itself uses, and it panics if called from non-test code, so it can't leak
+// into the binary. The argument order is (want, got) inside cmp.Diff but
+// (got, want) in this signature, matching Equal above — the "-want +got"
+// legend in the output tells you which side is which.
+//
+// opts forwards go-cmp options, most usefully cmpopts.IgnoreFields for the
+// timestamps and versions the database fills in:
+//
+//	assert.DeepEqual(t, got, want, cmpopts.IgnoreFields(data.Movie{}, "CreatedAt"))
+func DeepEqual[T any](t *testing.T, got, want T, opts ...cmp.Option) {
+	t.Helper()
+
+	if diff := cmp.Diff(want, got, opts...); diff != "" {
+		t.Errorf("mismatch (-want +got):\n%s", diff)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"greenlight/internal/assert"
 )
@@ -260,4 +261,108 @@ func TestMetricsEndpoint(t *testing.T) {
 	// from the healthcheck and a 404 from the unknown route.
 	assert.StringContains(t, body, `"200"`)
 	assert.StringContains(t, body, `"404"`)
+}
+
+// TestRateLimitIsPerClient checks that one client exhausting its bucket doesn't
+// affect anyone else.
+//
+// This is the part of the limiter that carries real risk. The map of
+// per-IP limiters and the realip lookup exist precisely so that a single noisy
+// client can't lock everyone out — but the existing tests all come from one
+// address, so a limiter that was accidentally global would pass them all and
+// take the whole API down in production the first time one client misbehaved.
+//
+// realip.FromRequest reads X-Forwarded-For, which is what lets a test present
+// itself as several different clients over one connection.
+func TestRateLimitIsPerClient(t *testing.T) {
+	app, _ := newTestApplication(t)
+
+	app.config.limiter.enabled = true
+	app.config.limiter.rps = 1
+	app.config.limiter.burst = 2
+
+	ts := newTestServer(t, app.routes())
+
+	// Client A burns its whole burst and then gets rejected.
+	for i := range 2 {
+		code := getAsClient(t, ts, "/v1/healthcheck", "203.0.113.1")
+		if code != http.StatusOK {
+			t.Fatalf("client A request %d: got %d; want 200 (within burst)", i+1, code)
+		}
+	}
+
+	assert.Equal(t, getAsClient(t, ts, "/v1/healthcheck", "203.0.113.1"), http.StatusTooManyRequests)
+
+	// Client B must be completely unaffected — a fresh bucket of its own.
+	for i := range 2 {
+		code := getAsClient(t, ts, "/v1/healthcheck", "198.51.100.7")
+		if code != http.StatusOK {
+			t.Fatalf("client B request %d: got %d; want 200 — B's bucket must be independent of A's", i+1, code)
+		}
+	}
+
+	// And B can be exhausted independently, without reviving A.
+	assert.Equal(t, getAsClient(t, ts, "/v1/healthcheck", "198.51.100.7"), http.StatusTooManyRequests)
+	assert.Equal(t, getAsClient(t, ts, "/v1/healthcheck", "203.0.113.1"), http.StatusTooManyRequests)
+
+	// A third client still gets through.
+	assert.Equal(t, getAsClient(t, ts, "/v1/healthcheck", "192.0.2.55"), http.StatusOK)
+}
+
+// TestRateLimitRefills checks that a client recovers once its bucket refills.
+//
+// A limiter that rejected a client permanently would pass every other test in
+// this file, since none of them wait. The rate is set high enough that the
+// pause is a few milliseconds of real time rather than a full second.
+func TestRateLimitRefills(t *testing.T) {
+	app, _ := newTestApplication(t)
+
+	app.config.limiter.enabled = true
+	// 100 requests/second means one token every 10ms.
+	app.config.limiter.rps = 100
+	app.config.limiter.burst = 1
+
+	ts := newTestServer(t, app.routes())
+
+	const ip = "203.0.113.99"
+
+	assert.Equal(t, getAsClient(t, ts, "/v1/healthcheck", ip), http.StatusOK)
+	assert.Equal(t, getAsClient(t, ts, "/v1/healthcheck", ip), http.StatusTooManyRequests)
+
+	// Wait for the bucket to refill. Generous relative to the 10ms interval, so
+	// a loaded CI machine doesn't produce a false failure.
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, getAsClient(t, ts, "/v1/healthcheck", ip), http.StatusOK)
+}
+
+// getAsClient issues a GET presenting itself as the given client IP.
+//
+// The testServer.get helper can't do this because it doesn't expose the
+// request, and every request in a test otherwise comes from 127.0.0.1 — which
+// makes per-client behaviour impossible to observe.
+//
+// Worth noting what this demonstrates: X-Forwarded-For is client-supplied and
+// trivially spoofed, exactly as rateLimit's comment warns. Being able to dodge
+// the limiter from a test by setting a header is the same thing an attacker
+// would do if the API were exposed without a proxy that overwrites it.
+func getAsClient(t *testing.T, ts *testServer, urlPath, ip string) int {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+urlPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Set("X-Forwarded-For", ip)
+
+	rs, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Body.Close()
+
+	io.Copy(io.Discard, rs.Body)
+
+	return rs.StatusCode
 }

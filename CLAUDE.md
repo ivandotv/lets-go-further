@@ -28,7 +28,9 @@ make run/api            # run the API server (auto-migrates on startup)
 
 make test               # go test -race ./...
 make test/short         # skip database-backed tests (go test -short)
-make test/cover         # coverage, opens HTML report
+make test/cover         # coverage (-coverpkg=./...), opens HTML report
+make test/fuzz          # 30s per package across the 4 fuzz targets
+make test/bench         # benchmarks with allocation counts
 make audit               # tidy + fmt + vet + test -race  (run before finishing any change)
 
 # Single test:
@@ -76,20 +78,40 @@ compose: `requirePermission` → `requireActivatedUser` → `requireAuthenticate
 
 ## Testing conventions
 
+**`internal/testutil/doc.go` is the full guide to the suite** — commands,
+layout, and the Go testing machinery used. Read it (`go doc
+greenlight/internal/testutil`) before adding tests; don't re-derive it here.
+
 - Every test gets its **own** SQLite database via `internal/testutil.NewDB(t)`
   — a temp file (not `:memory:`, which can vanish mid-test under connection
   pooling), migrated fresh from the embedded `.sql` files, cleaned up
-  automatically. No mocks, no shared fixtures, safe to run in parallel.
+  automatically. No mocks, no shared fixtures, safe to run in parallel. It takes
+  a `testing.TB`, so benchmarks can use it too.
 - `go test -short` skips anything database-backed.
-- Both `cmd/api` and `internal/data` have a `TestMain` that drops
+- `cmd/api`, `cmd/seed` and `internal/data` each have a `TestMain` that drops
   `data.BcryptCost` to `bcrypt.MinCost` — full cost-12 bcrypt would make the
   suite take ~10x longer. This is safe because bcrypt embeds its cost factor
   in the hash itself, so verification is unaffected.
 - `cmd/api` tests spin up a real `httptest` server; nothing is mocked except
   outbound email (`Mailer` is an interface for exactly this reason — see
-  `cmd/api/main.go`).
-- Coverage baseline: `internal/validator` 100%, `internal/data` 91%,
-  `cmd/api` 70% (uncovered part is mostly `main`/`run`/`serve` process wiring).
+  `cmd/api/main.go`). The real mailer is covered separately in
+  `internal/mailer`, against a fake SMTP server defined in its own test file.
+- **One test dependency: `github.com/google/go-cmp`**, used via
+  `assert.DeepEqual` for slices/maps/structs that `assert.Equal`'s `comparable`
+  constraint can't take. Don't add testify — `internal/assert/assert.go`
+  documents why this project hand-rolls its helpers instead.
+- Coverage baseline: `internal/validator` 100%, `internal/mailer` 93%,
+  `internal/data` 91%, `internal/db` 84%, `cmd/api` 81%, `cmd/seed` 73%; **84%
+  module-wide**. The rest is mostly `main`/`run` process wiring. Note
+  `make test/cover` uses `-coverpkg=./...` — without it `internal/db` reads 0%,
+  because it's exercised through `internal/testutil` from other packages.
+- Beyond example-based tests there are **4 fuzz targets** (`Runtime.UnmarshalJSON`,
+  `Genres.Scan`, `readJSON`, `EmailRX`), **concurrency tests** in
+  `internal/data/concurrency_test.go` that guard `busy_timeout`/WAL/optimistic
+  locking, and **benchmarks**. `testing/synctest` (stdlib, Go 1.25+) is used in
+  `internal/mailer` to test the retry loop's sleeps in zero real time — it does
+  not suit tests that go over a real socket, since bubble goroutines must be
+  self-contained.
 
 ## Things worth knowing before touching SQL or migrations
 

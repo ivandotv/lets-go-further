@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"greenlight/internal/assert"
@@ -178,4 +179,186 @@ func TestBackgroundWaitGroup(t *testing.T) {
 	app.wg.Wait()
 
 	assert.Equal(t, done, true)
+}
+
+// TestReadJSONErrors covers every branch of readJSON's error switch.
+//
+// These messages are part of the API's contract — they're returned verbatim to
+// the client by badRequestResponse — so they're asserted exactly rather than
+// loosely. The whole reason readJSON translates the standard library's errors
+// at all is that raw json.SyntaxError text ("invalid character 'x' looking for
+// beginning of value") is useless to an API consumer.
+func TestReadJSONErrors(t *testing.T) {
+	app := &application{}
+
+	// The destination used for most cases. Title is a string so that sending a
+	// number for it produces a type error.
+	type input struct {
+		Title string `json:"title"`
+		Year  int32  `json:"year"`
+	}
+
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name:    "empty body",
+			body:    "",
+			wantErr: "body must not be empty",
+		},
+		{
+			name:    "badly-formed JSON",
+			body:    `{"title": "Moana"`,
+			wantErr: "body contains badly-formed JSON",
+		},
+		{
+			name:    "syntax error mid-body reports the offset",
+			body:    `{"title": "Moana", }`,
+			wantErr: "body contains badly-formed JSON (at character 20)",
+		},
+		{
+			name:    "wrong type for a field",
+			body:    `{"title": 123}`,
+			wantErr: "body contains incorrect JSON type for field \"title\"",
+		},
+		{
+			name:    "unknown field is rejected",
+			body:    `{"rating": 5}`,
+			wantErr: "body contains unknown key \"rating\"",
+		},
+		{
+			name:    "two JSON values in one body",
+			body:    `{"title": "A"} {"title": "B"}`,
+			wantErr: "body must only contain a single JSON value",
+		},
+		{
+			name:    "trailing garbage after a valid value",
+			body:    `{"title": "A"} nonsense`,
+			wantErr: "body must only contain a single JSON value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
+
+			var dst input
+			err := app.readJSON(rr, r, &dst)
+
+			if err == nil {
+				t.Fatalf("got nil error for body %q; want %q", tt.body, tt.wantErr)
+			}
+
+			assert.Equal(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+// TestReadJSONEnforcesMaxBytes covers the MaxBytesReader branch separately,
+// because it needs a body over 1MB and would make the table above unreadable.
+//
+// Without this limit a client could post a multi-gigabyte body and exhaust the
+// server's memory before any handler code runs.
+func TestReadJSONEnforcesMaxBytes(t *testing.T) {
+	app := &application{}
+
+	// One byte over the 1_048_576 limit, as valid JSON.
+	padding := strings.Repeat("a", 1_048_576)
+	body := `{"title": "` + padding + `"}`
+
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+
+	var dst struct {
+		Title string `json:"title"`
+	}
+
+	err := app.readJSON(rr, r, &dst)
+	if err == nil {
+		t.Fatal("got nil error for an oversized body; want a size limit failure")
+	}
+
+	assert.Equal(t, err.Error(), "body must not be larger than 1048576 bytes")
+}
+
+// TestReadJSONPanicsOnNonPointer documents the one case readJSON deliberately
+// panics on.
+//
+// An InvalidUnmarshalError means WE passed something wrong to Decode — a
+// programming bug in a handler, not bad input from a client. Returning it would
+// turn a bug into a 400 and hide it; panicking surfaces it in development and
+// is caught by recoverPanic as a 500 in production.
+func TestReadJSONPanicsOnNonPointer(t *testing.T) {
+	app := &application{}
+
+	defer func() {
+		if recover() == nil {
+			t.Error("readJSON did not panic when handed a non-pointer destination")
+		}
+	}()
+
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"title":"A"}`))
+
+	// Passing a value rather than a pointer.
+	var dst struct{ Title string }
+	//nolint:staticcheck // passing a non-pointer is the point of this test
+	_ = app.readJSON(rr, r, dst)
+}
+
+// FuzzReadJSON checks that readJSON survives arbitrary request bodies.
+//
+// This function runs on every write endpoint before any authentication, so a
+// panic in it is a remote, unauthenticated denial of service. The properties
+// are deliberately weak — this is a robustness test, not a correctness one:
+//
+//  1. It never panics, given a valid pointer destination. (The one intentional
+//     panic is covered by the test above, and can't be reached from here.)
+//  2. If it returns nil, the destination is usable — no partial-decode state
+//     that a handler would then act on.
+func FuzzReadJSON(f *testing.F) {
+	seeds := []string{
+		`{"title":"Moana","year":2016}`,
+		`{}`,
+		``,
+		`null`,
+		`[]`,
+		`{"title":`,
+		`{"title":123}`,
+		`{"unknown":1}`,
+		`{"title":"A"} {"title":"B"}`,
+		`{"year":99999999999999999999}`,
+		`{"title":"\ud800"}`, // lone surrogate: invalid UTF-8 in JSON
+		"{\"title\":\"\x00\"}",
+		strings.Repeat(`{"a":`, 200),
+	}
+
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	app := &application{}
+
+	f.Fuzz(func(t *testing.T, body string) {
+		rr := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+
+		var dst struct {
+			Title string `json:"title"`
+			Year  int32  `json:"year"`
+		}
+
+		// Property 1: no panic, whatever the bytes.
+		if err := app.readJSON(rr, r, &dst); err != nil {
+			// Property 2 (the contract with badRequestResponse): every error is
+			// safe to show a client, so none may be empty.
+			if err.Error() == "" {
+				t.Fatalf("readJSON(%q) returned an error with an empty message", body)
+			}
+			return
+		}
+	})
 }

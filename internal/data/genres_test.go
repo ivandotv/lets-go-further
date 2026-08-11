@@ -130,3 +130,79 @@ func TestGenres_JSONRepresentation(t *testing.T) {
 
 	assert.Equal(t, string(b), `["drama","romance"]`)
 }
+
+// FuzzGenresScan hammers the database→Go direction with arbitrary bytes.
+//
+// Scan is where data from OUTSIDE the Go type system re-enters it. Everything
+// else in this package can assume a Genres value is well-formed, because the
+// only way to build one is through code. Scan is the exception: it runs on
+// whatever happens to be in the column, including rows written by an older
+// version of this code, by a migration, or by hand in `make db/shell`.
+//
+// Properties checked:
+//
+//  1. It never panics.
+//  2. On success the result is never nil, so callers never have to nil-check
+//     and an API response is always `[]` rather than `null`.
+//  3. Anything Scan accepts survives a Value/Scan round-trip — the invariant
+//     that keeps the two halves of this custom type in step.
+func FuzzGenresScan(f *testing.F) {
+	seeds := []string{
+		`["drama"]`,
+		`["drama","sci-fi"]`,
+		`[]`,
+		`null`,
+		``,
+		`[""]`,
+		`["   "]`,
+		`{"not":"an array"}`,
+		`[1,2,3]`,
+		`["unterminated`,
+		`[["nested"]]`,
+		`["with \"quotes\""]`,
+	}
+
+	for _, seed := range seeds {
+		f.Add([]byte(seed))
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var g Genres
+
+		// Property 1: no panic. Try both spellings, since the type switch
+		// handles []byte and string and drivers differ in which they return.
+		errBytes := g.Scan(data)
+
+		var gs Genres
+		errString := gs.Scan(string(data))
+
+		// The two must agree — if they ever diverged, behaviour would depend on
+		// which driver you happened to be using.
+		if (errBytes == nil) != (errString == nil) {
+			t.Fatalf("Scan(%q) disagreed between []byte (%v) and string (%v)",
+				data, errBytes, errString)
+		}
+
+		if errBytes != nil {
+			return
+		}
+
+		// Property 2: never nil on success.
+		if g == nil {
+			t.Fatalf("Scan(%q) succeeded but left a nil Genres; callers rely on a usable slice", data)
+		}
+
+		// Property 3: round-trip through Value and back.
+		v, err := g.Value()
+		if err != nil {
+			t.Fatalf("Value() after accepting %q: %v", data, err)
+		}
+
+		var back Genres
+		if err := back.Scan(v); err != nil {
+			t.Fatalf("input %q accepted, but its own Value() output %v was rejected: %v", data, v, err)
+		}
+
+		assert.DeepEqual(t, back, g)
+	})
+}

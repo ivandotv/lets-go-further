@@ -130,10 +130,45 @@ test/short:
 	go test -short ./...
 
 ## test/cover: run tests and open the HTML coverage report
+#
+# -coverpkg=./... measures coverage of EVERY package, not just the one whose
+# tests are running. Without it, internal/db reports 0% — it has its own tests
+# now, but most of its lines are exercised through internal/testutil from other
+# packages, and the default per-package instrumentation doesn't credit that.
 .PHONY: test/cover
 test/cover:
-	go test -coverprofile=/tmp/coverage.out ./...
+	go test -coverpkg=./... -coverprofile=/tmp/coverage.out ./...
 	go tool cover -html=/tmp/coverage.out
+
+## test/fuzz: run each fuzz target in turn (override with fuzztime=10s)
+#
+# Not part of `audit`: fuzzing is open-ended, so it's something you run
+# deliberately rather than on every commit. A crasher gets written to the
+# package's testdata/fuzz/ directory and becomes a permanent seed for the normal
+# `go test` run — so a failure here turns itself into a regression test, and you
+# commit the file.
+#
+# Two constraints shape this target:
+#   - -fuzz takes one PACKAGE at a time, and
+#   - the regexp must match exactly ONE target, or the toolchain refuses with
+#     "-fuzz matches more than one fuzz test". internal/data has two, so every
+#     target is named individually rather than matched with a bare `Fuzz`.
+#
+# -run=^$$ matches no ordinary test (the $$ is a literal $ escaped for make), so
+# each line does nothing but fuzz.
+fuzztime ?= 30s
+
+.PHONY: test/fuzz
+test/fuzz:
+	go test -run=^$$ -fuzz=FuzzRuntimeUnmarshalJSON -fuzztime=${fuzztime} ./internal/data/
+	go test -run=^$$ -fuzz=FuzzGenresScan -fuzztime=${fuzztime} ./internal/data/
+	go test -run=^$$ -fuzz=FuzzEmailRX -fuzztime=${fuzztime} ./internal/validator/
+	go test -run=^$$ -fuzz=FuzzReadJSON -fuzztime=${fuzztime} ./cmd/api/
+
+## test/bench: run all benchmarks with allocation counts
+.PHONY: test/bench
+test/bench:
+	go test -bench=. -benchmem -run=^$$ ./...
 
 # ==================================================================================== #
 # BUILD

@@ -105,3 +105,77 @@ func TestRuntime_RoundTrip(t *testing.T) {
 		assert.Equal(t, decoded, original)
 	}
 }
+
+// FuzzRuntimeUnmarshalJSON checks two properties across arbitrary input.
+//
+// Fuzzing suits this function particularly well: it's a hand-written parser
+// that does string surgery (Unquote, Split, ParseInt) on attacker-controlled
+// bytes, and every one of those steps has edge cases a table-driven test only
+// samples. The table above covers the cases we THOUGHT of; this covers the ones
+// we didn't.
+//
+// The two properties:
+//
+//  1. It never panics. An index-out-of-range here would be a remote DoS, since
+//     this runs on request bodies before any authentication.
+//  2. Round-trip stability: any input it ACCEPTS must survive a
+//     marshal/unmarshal cycle unchanged. That's what stops a "fix" to one
+//     method from silently desynchronising it from the other.
+func FuzzRuntimeUnmarshalJSON(f *testing.F) {
+	// Seeds are the interesting shapes from the table test above, plus the
+	// boundary values of the int32 range the parser targets.
+	seeds := []string{
+		`"107 mins"`,
+		`"0 mins"`,
+		`"-1 mins"`,
+		`"2147483647 mins"`,  // math.MaxInt32
+		`"-2147483648 mins"`, // math.MinInt32
+		`"2147483648 mins"`,  // one past MaxInt32; must be rejected
+		`"107"`,
+		`"107 minutes"`,
+		`"107 mins extra"`,
+		`" 107 mins"`,
+		`""`,
+		`107`,
+		`null`,
+		`{}`,
+		`"mins mins"`,
+		`"+107 mins"`,
+	}
+
+	for _, seed := range seeds {
+		f.Add([]byte(seed))
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var r Runtime
+
+		// Property 1: no panic, whatever the input.
+		if err := r.UnmarshalJSON(data); err != nil {
+			// Every rejection must use the sentinel the handlers switch on. If
+			// this ever returned a bare error, createMovieHandler would turn a
+			// bad runtime into a 500 instead of a 422.
+			if !errors.Is(err, ErrInvalidRuntimeFormat) {
+				t.Fatalf("UnmarshalJSON(%q) returned %v; want ErrInvalidRuntimeFormat", data, err)
+			}
+			return
+		}
+
+		// Property 2: accepted input round-trips.
+		marshalled, err := r.MarshalJSON()
+		if err != nil {
+			t.Fatalf("MarshalJSON after accepting %q: %v", data, err)
+		}
+
+		var got Runtime
+		if err := got.UnmarshalJSON(marshalled); err != nil {
+			t.Fatalf("input %q accepted as %d, but its own output %q was rejected: %v",
+				data, r, marshalled, err)
+		}
+
+		if got != r {
+			t.Errorf("round-trip changed the value: %q -> %d -> %q -> %d",
+				data, r, marshalled, got)
+		}
+	})
+}

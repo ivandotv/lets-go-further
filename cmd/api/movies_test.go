@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	"greenlight/internal/assert"
@@ -395,4 +398,275 @@ func TestMovieEditConflict(t *testing.T) {
 	stale.Title = "Second Write"
 	err = app.models.Movies.Update(stale)
 	assert.Equal(t, err, data.ErrEditConflict)
+}
+
+// TestMovieEditConflictOverHTTP checks what a client actually SEES when
+// optimistic locking fires.
+//
+// The test above stops at the model layer, which left the 409 translation in
+// updateMovieHandler completely uncovered — a bug there would have turned every
+// edit conflict into a 500 with nobody noticing.
+//
+// The conflict can't be staged deterministically from outside the API: the
+// handler re-reads the movie itself, so there's no window between its Get and
+// its Update for a test to reach into. So this fires concurrent PATCHes and
+// asserts an INVARIANT rather than a specific outcome — which makes it strict
+// without being flaky:
+//
+//   - every response is either 200 or 409, never a 500;
+//   - the final version equals 1 + the number of successes, so no write was
+//     lost and none was double-counted;
+//   - the stored title belongs to one of the writers that got a 200.
+func TestMovieEditConflictOverHTTP(t *testing.T) {
+	app, _ := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	writeToken := createActivatedUser(t, app, "writer@example.com",
+		data.PermissionMoviesRead, data.PermissionMoviesWrite)
+
+	movie := createTestMovie(t, app, "Contested", 2000)
+	path := fmt.Sprintf("/v1/movies/%d", movie.ID)
+
+	const writers = 8
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		codes   []int
+		winners []string
+		start   = make(chan struct{})
+	)
+
+	for i := range writers {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			title := fmt.Sprintf("Written by %d", i)
+
+			<-start
+
+			code, _, body := ts.patch(t, path, writeToken, map[string]any{"title": title})
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			codes = append(codes, code)
+
+			if code == http.StatusOK {
+				winners = append(winners, title)
+			}
+
+			if code == http.StatusConflict {
+				// The message is part of the contract: it tells the client this
+				// is worth retrying, unlike most 4xx responses.
+				if !strings.Contains(body, "edit conflict") {
+					t.Errorf("409 body did not mention an edit conflict: %s", body)
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+
+	var succeeded int
+
+	for _, code := range codes {
+		switch code {
+		case http.StatusOK:
+			succeeded++
+		case http.StatusConflict:
+			// Expected under contention.
+		default:
+			t.Errorf("got status %d from a concurrent PATCH; want 200 or 409", code)
+		}
+	}
+
+	if succeeded == 0 {
+		t.Fatal("no concurrent PATCH succeeded; expected at least one to win")
+	}
+
+	final, err := app.models.Movies.Get(movie.ID)
+	assert.NilError(t, err)
+
+	// Version starts at 1 and increments once per successful write. If a write
+	// were lost — two clients both getting 200 off the same version — this
+	// would come out short.
+	assert.Equal(t, final.Version, int32(1+succeeded))
+
+	if !slices.Contains(winners, final.Title) {
+		t.Errorf("stored title %q was not written by any request that got a 200 (%v)", final.Title, winners)
+	}
+}
+
+// TestMovieHandlersRejectInvalidIDs covers readIDParam's error branch across
+// every endpoint that takes an {id}.
+//
+// All of them answer 404 rather than 400. That's deliberate: "/v1/movies/abc"
+// simply isn't a resource that could exist, and returning 404 avoids telling a
+// prober anything about the ID format.
+func TestMovieHandlersRejectInvalidIDs(t *testing.T) {
+	app, _ := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	token := createActivatedUser(t, app, "writer@example.com",
+		data.PermissionMoviesRead, data.PermissionMoviesWrite)
+
+	ids := []struct {
+		name string
+		id   string
+	}{
+		{"non-numeric", "abc"},
+		{"zero", "0"},
+		{"negative", "-1"},
+		{"float", "1.5"},
+		{"overflowing int64", "99999999999999999999999"},
+		{"numeric with suffix", "1abc"},
+	}
+
+	for _, tc := range ids {
+		t.Run(tc.name, func(t *testing.T) {
+			path := "/v1/movies/" + tc.id
+
+			code, _, _ := ts.get(t, path, token)
+			assert.Equal(t, code, http.StatusNotFound)
+
+			code, _, _ = ts.patch(t, path, token, map[string]any{"title": "x"})
+			assert.Equal(t, code, http.StatusNotFound)
+
+			code, _, _ = ts.delete(t, path, token)
+			assert.Equal(t, code, http.StatusNotFound)
+		})
+	}
+}
+
+// TestUpdateMovieRejectsMalformedBodies covers updateMovieHandler's readJSON
+// branch, which was uncovered because every existing update test sends valid
+// JSON.
+func TestUpdateMovieRejectsMalformedBodies(t *testing.T) {
+	app, _ := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	token := createActivatedUser(t, app, "writer@example.com",
+		data.PermissionMoviesRead, data.PermissionMoviesWrite)
+
+	movie := createTestMovie(t, app, "Existing", 1994)
+	path := fmt.Sprintf("/v1/movies/%d", movie.ID)
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"truncated JSON", `{"title": "A"`, "badly-formed JSON"},
+		{"empty body", ``, "must not be empty"},
+		{"unknown field", `{"director": "Nolan"}`, "unknown key"},
+		{"wrong type for title", `{"title": 42}`, "incorrect JSON type"},
+		// Runtime has its own UnmarshalJSON, and its sentinel error reaches the
+		// client verbatim through readJSON's default branch rather than being
+		// rewritten as a JSON type error. That's the point of the custom type:
+		// the client is told the format is wrong, not that the type is.
+		{"runtime in the wrong format", `{"runtime": "abc"}`, "invalid runtime format"},
+		{"runtime as a bare number", `{"runtime": 107}`, "invalid runtime format"},
+		{"two JSON values", `{"title":"A"} {"title":"B"}`, "single JSON value"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, _, body := ts.patch(t, path, token, tt.body)
+
+			assert.Equal(t, code, http.StatusBadRequest)
+			assert.StringContains(t, body, tt.want)
+		})
+	}
+
+	// None of that should have touched the record.
+	after, err := app.models.Movies.Get(movie.ID)
+	assert.NilError(t, err)
+	assert.Equal(t, after.Title, "Existing")
+	assert.Equal(t, after.Version, int32(1))
+}
+
+// TestListMoviesRejectsInvalidFilters covers the 422 branch of
+// listMoviesHandler, including the sort safelist.
+//
+// The sort case is the important one. Filters.sortColumn PANICS on a value
+// outside the safelist, because the column name is interpolated into the SQL
+// string and an unchecked value would be a SQL injection. That panic must never
+// be reachable from a request — ValidateFilters has to reject the input first,
+// turning it into a clean 422. This test is what proves the validator catches
+// it before the query builder does.
+func TestListMoviesRejectsInvalidFilters(t *testing.T) {
+	app, _ := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	token := createActivatedUser(t, app, "reader@example.com", data.PermissionMoviesRead)
+
+	tests := []struct {
+		name      string
+		query     string
+		wantField string
+	}{
+		{"page zero", "?page=0", "page"},
+		{"negative page", "?page=-1", "page"},
+		{"page too large", "?page=10000001", "page"},
+		{"page_size zero", "?page_size=0", "page_size"},
+		{"page_size too large", "?page_size=101", "page_size"},
+		{"non-numeric page", "?page=abc", "page"},
+		{"non-numeric page_size", "?page_size=abc", "page_size"},
+		// %3B is an encoded semicolon. It has to be encoded to reach the
+		// handler at all — see TestListMoviesDropsSemicolonQueryParams below.
+		{"SQL injection attempt in sort", "?sort=id%3BDROP%20TABLE%20movies", "sort"},
+		{"sort not in the safelist", "?sort=created_at", "sort"},
+		{"sort with a valid column but bad direction marker", "?sort=%2B%2Byear", "sort"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, _, body := ts.get(t, "/v1/movies"+tt.query, token)
+
+			assert.Equal(t, code, http.StatusUnprocessableEntity)
+			assert.StringContains(t, body, tt.wantField)
+		})
+	}
+
+	// And the table is still there — i.e. the injection attempt above did
+	// nothing. If sortColumn's safelist had been bypassed, the DROP would have
+	// been interpolated straight into the ORDER BY clause.
+	code, _, _ := ts.get(t, "/v1/movies", token)
+	assert.Equal(t, code, http.StatusOK)
+}
+
+// TestListMoviesDropsSemicolonQueryParams documents a standard-library
+// behaviour that's worth knowing about before you write a security test.
+//
+// Since Go 1.17, url.Values.Query() REJECTS a query string containing a raw
+// semicolon and silently drops the offending parameter rather than splitting on
+// it (semicolons used to be an alternative separator, and the ambiguity was a
+// request-smuggling vector). So "?sort=id;DROP TABLE movies" never reaches the
+// handler as a sort value at all — the parameter vanishes and the default sort
+// applies.
+//
+// The practical consequence: a test that "proves" the safelist blocks a
+// semicolon-laden sort proves nothing, because the string never gets that far.
+// The real test is the encoded case above. This one pins the drop behaviour so
+// the distinction stays visible.
+func TestListMoviesDropsSemicolonQueryParams(t *testing.T) {
+	app, _ := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	token := createActivatedUser(t, app, "reader@example.com", data.PermissionMoviesRead)
+
+	createTestMovie(t, app, "Alpha", 2001)
+	createTestMovie(t, app, "Beta", 2002)
+
+	// The parameter is dropped, so this behaves exactly like no sort at all:
+	// the default "id" applies and the request succeeds.
+	code, _, body := ts.get(t, "/v1/movies?sort=id;DROP+TABLE+movies", token)
+
+	assert.Equal(t, code, http.StatusOK)
+	assert.StringContains(t, body, "Alpha")
+	assert.StringContains(t, body, "Beta")
 }

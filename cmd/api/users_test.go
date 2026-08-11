@@ -49,7 +49,7 @@ func TestRegisterUser(t *testing.T) {
 		}
 
 		// The welcome email is sent from a background goroutine, so wait for it.
-		msgs := mailer.waitForEmail(t, 1)
+		msgs := mailer.waitForEmail(t, app, 1)
 		assert.Equal(t, msgs[0].Recipient, "alice@example.com")
 		assert.Equal(t, msgs[0].Template, "user_welcome.tmpl")
 
@@ -147,7 +147,7 @@ func TestActivateUser(t *testing.T) {
 	})
 	assert.Equal(t, code, http.StatusAccepted)
 
-	msgs := mailer.waitForEmail(t, 1)
+	msgs := mailer.waitForEmail(t, app, 1)
 	token := msgs[0].Data["activationToken"].(string)
 
 	t.Run("invalid token is rejected", func(t *testing.T) {
@@ -188,6 +188,80 @@ func TestActivateUser(t *testing.T) {
 		assert.Equal(t, code, http.StatusUnprocessableEntity)
 		assert.StringContains(t, body, "invalid or expired activation token")
 	})
+}
+
+// TestPublicEndpointsRejectMalformedBodies covers the readJSON branch of the
+// three UNAUTHENTICATED handlers.
+//
+// These deserve their own test rather than being folded in with the movie
+// endpoints, because they're the only handlers reachable with no credentials at
+// all. Anything that gets past readJSON here does so with the request entirely
+// under an anonymous caller's control, so "malformed input produces a clean 400
+// rather than a panic or a 500" is a security property, not just tidiness.
+func TestPublicEndpointsRejectMalformedBodies(t *testing.T) {
+	app, _ := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	endpoints := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"register", http.MethodPost, "/v1/users"},
+		{"activate", http.MethodPut, "/v1/users/activated"},
+		{"authenticate", http.MethodPost, "/v1/tokens/authentication"},
+	}
+
+	bodies := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"empty", ``, "must not be empty"},
+		{"truncated", `{"email": "a@b.com"`, "badly-formed JSON"},
+		{"array instead of object", `["a@b.com"]`, "incorrect JSON type"},
+		{"unknown field", `{"nonsense": true}`, "unknown key"},
+		{"two values", `{} {}`, "single JSON value"},
+		{"bare string", `"just a string"`, "incorrect JSON type"},
+	}
+
+	for _, ep := range endpoints {
+		for _, b := range bodies {
+			t.Run(ep.name+"/"+b.name, func(t *testing.T) {
+				code, _, body := ts.do(t, ep.method, ep.path, "", b.body)
+
+				assert.Equal(t, code, http.StatusBadRequest)
+				assert.StringContains(t, body, b.want)
+			})
+		}
+	}
+}
+
+// TestRegisterUserSendsNoEmailOnFailure checks that a rejected registration
+// doesn't trigger the background mail goroutine.
+//
+// The email is sent AFTER the insert in registerUserHandler, so a validation
+// failure should short-circuit before it. Getting this wrong would mean
+// emailing an activation token for an account that was never created.
+func TestRegisterUserSendsNoEmailOnFailure(t *testing.T) {
+	app, mailer := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	// Fails validation: the password is too short.
+	code, _, _ := ts.post(t, "/v1/users", "", map[string]any{
+		"name":     "Alice",
+		"email":    "alice@example.com",
+		"password": "short",
+	})
+	assert.Equal(t, code, http.StatusUnprocessableEntity)
+
+	// Wait for any background work that might have been queued, then confirm
+	// none of it sent mail.
+	app.wg.Wait()
+
+	if msgs := mailer.messages(); len(msgs) != 0 {
+		t.Errorf("got %d email(s) after a failed registration; want 0: %+v", len(msgs), msgs)
+	}
 }
 
 // containsAny reports whether s contains any of the substrings. Used above to

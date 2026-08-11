@@ -400,6 +400,7 @@
       <li><a href="#s6"><span class="n">06</span>Auth &amp; permissions</a></li>
       <li><a href="#s7"><span class="n">07</span>Boot sequence</a></li>
       <li><a href="#s8"><span class="n">08</span>Load-bearing decisions</a></li>
+      <li><a href="#s9"><span class="n">09</span>How it's tested</a></li>
     </ol>
   </nav>
 
@@ -495,7 +496,8 @@
         <div class="tree-row sub"><div class="tree-path">db/</div><div class="tree-desc">storage layer — opens the SQLite connection pool, runs migrations</div></div>
         <div class="tree-row sub"><div class="tree-path">mailer/</div><div class="tree-desc">SMTP client + embedded email templates</div></div>
         <div class="tree-row sub"><div class="tree-path">validator/</div><div class="tree-desc">generic "collect field errors into a map" helper</div></div>
-        <div class="tree-row sub"><div class="tree-path">testutil/</div><div class="tree-desc">spins up a fresh migrated test database per test</div></div>
+        <div class="tree-row sub"><div class="tree-path">assert/</div><div class="tree-desc">tiny generic assertion helpers used by every test</div></div>
+        <div class="tree-row sub"><div class="tree-path">testutil/</div><div class="tree-desc">fresh migrated test database per test; <code>doc.go</code> guides the whole suite</div></div>
         <div class="tree-row"><div class="tree-path">migrations/</div><div class="tree-desc">Versioned .sql schema files, embedded into the binary</div></div>
       </div>
       <div class="prose" style="margin-top:1.5rem;">
@@ -802,6 +804,55 @@
           <p><code>recoverPanic</code> only guards the request's goroutine — a panic in a spawned one kills the process otherwise, so <code>app.background()</code> wraps every background task in its own recover.</p>
         </div>
       </div>
+    </section>
+
+    <section class="doc" id="s9">
+      <div class="sec-head"><span class="sec-num">§9</span><h2>How it's tested</h2></div>
+      <div class="prose">
+        <p>One external test dependency (<code>github.com/google/go-cmp</code>); everything else is the standard library. The full guide — commands, conventions, and the Go testing machinery involved — lives in <code>internal/testutil/doc.go</code>, readable with <code>go doc greenlight/internal/testutil</code>.</p>
+      </div>
+
+      <div class="tree">
+        <div class="tree-row"><div class="tree-path">make test</div><div class="tree-desc"><code>go test -race ./...</code> — the everyday command</div></div>
+        <div class="tree-row"><div class="tree-path">make test/short</div><div class="tree-desc">skips database-backed tests</div></div>
+        <div class="tree-row"><div class="tree-path">make test/cover</div><div class="tree-desc">coverage with <code>-coverpkg=./...</code>, opens an HTML report</div></div>
+        <div class="tree-row"><div class="tree-path">make test/fuzz</div><div class="tree-desc">30s of fuzzing per package</div></div>
+        <div class="tree-row"><div class="tree-path">make test/bench</div><div class="tree-desc">benchmarks with allocation counts</div></div>
+        <div class="tree-row"><div class="tree-path">make audit</div><div class="tree-desc">tidy + fmt + vet + test -race</div></div>
+      </div>
+
+      <div class="prose">
+        <p><strong>Layers of the suite, outside-in.</strong> Nothing is mocked except outbound email, and there are no database mocks anywhere — SQLite is embedded, so a real database is a temp file costing about a millisecond. Since the thing most likely to be wrong in a model layer is the SQL, and a mock cannot check SQL, that is a far better trade than it would be against Postgres.</p>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <h3>End-to-end HTTP</h3>
+          <p><code>cmd/api/*_test.go</code> — a real <code>httptest.Server</code>, real database, real middleware chain. Includes the full access-control matrix and <code>serve()</code> under a genuine <code>SIGTERM</code>, proving in-flight requests and background email both finish before shutdown returns.</p>
+        </div>
+        <div class="card">
+          <h3>Model layer</h3>
+          <p><code>internal/data/*_test.go</code> — the SQL itself, against the real migrated schema. Optimistic locking, foreign-key cascades, the sort safelist, token scoping.</p>
+        </div>
+        <div class="card">
+          <h3>Concurrency</h3>
+          <p><code>concurrency_test.go</code> — 20 goroutines writing at once (guarding <code>busy_timeout</code>), readers running during writes (guarding WAL), and two racing updates where exactly one must win and no write may be lost. All under <code>-race</code>.</p>
+        </div>
+        <div class="card">
+          <h3>Connection setup</h3>
+          <p><code>internal/db/db_test.go</code> — checks out four connections <em>simultaneously</em> and asserts every PRAGMA on all of them. That's what defeats the "run <code>PRAGMA foreign_keys = ON</code> once at startup" mistake, which a single-connection test would happily pass.</p>
+        </div>
+        <div class="card">
+          <h3>Email</h3>
+          <p><code>internal/mailer</code> — template rendering, HTML escaping and MIME structure, asserted on the bytes sent to a fake in-process SMTP server written in the test file. No SMTP dependency.</p>
+        </div>
+        <div class="card">
+          <h3>Fuzzing</h3>
+          <p>Four targets on the hand-written parsers: <code>Runtime.UnmarshalJSON</code>, <code>Genres.Scan</code>, <code>readJSON</code>, <code>EmailRX</code>. They assert properties — never panics, accepted input round-trips unchanged, and an accepted email address can never contain a line break (SMTP header injection).</p>
+        </div>
+      </div>
+
+      <div class="callout"><strong>Measuring coverage —</strong> <code>make test/cover</code> passes <code>-coverpkg=./...</code>. Without it <code>go test -cover</code> instruments only the package under test, and <code>internal/db</code> reads <strong>0%</strong> despite being exercised by nearly every test in the repo through <code>internal/testutil</code>. Current: <code>validator</code> 100%, <code>mailer</code> 93%, <code>data</code> 91%, <code>db</code> 84%, <code>cmd/api</code> 81%, <code>cmd/seed</code> 73% — <strong>84% module-wide</strong>, the remainder mostly <code>main</code>/<code>run</code> process wiring.</div>
     </section>
 
   </main>

@@ -1,14 +1,22 @@
-// Package testutil provides shared helpers for tests.
-//
-// It lives in its own package (rather than in a _test.go file) because both
-// internal/data and cmd/api need it, and helpers in a _test.go file are only
-// visible to the package they're declared in.
-//
-// This package imports "testing", which is normally something to avoid in
-// non-test code. It's fine here because nothing on the production build path
-// imports testutil, so the testing package never gets linked into the api
-// binary.
 package testutil
+
+// (The package doc lives in doc.go, which also carries the guide to the whole
+// test suite. A package may only have one doc comment, so this file starts with
+// a plain comment instead.)
+//
+// ── WHY THIS IS A PACKAGE AND NOT A _test.go FILE ────────────────────────────
+//
+// Helpers declared in a _test.go file are visible only to the package that
+// declares them — the Go compiler doesn't export them, and you can't import
+// them from elsewhere. Both internal/data and cmd/api need a test database, so
+// this has to be an ordinary package to be shared.
+//
+// That means it imports "testing" from non-test code, which is normally a smell:
+// it drags the testing package's flags and globals into anything that imports
+// it. It's fine here because nothing on the production build path imports
+// testutil, so the testing package is never linked into the api binary. (You can
+// confirm that with `go list -deps ./cmd/api | grep testing`, which comes back
+// empty.)
 
 import (
 	"database/sql"
@@ -36,7 +44,11 @@ import (
 // Each test gets its OWN database, which means tests are fully isolated and can
 // safely run in parallel — no shared state, no ordering dependencies, no
 // truncating tables between cases.
-func NewDB(t *testing.T) *sql.DB {
+//
+// The parameter is testing.TB rather than *testing.T so that benchmarks can use
+// it too. TB is the interface both *testing.T and *testing.B satisfy, and every
+// method used below (Helper, TempDir, Fatalf, Cleanup) is on it.
+func NewDB(t testing.TB) *sql.DB {
 	// t.Helper() makes failures report against the calling test's line.
 	t.Helper()
 

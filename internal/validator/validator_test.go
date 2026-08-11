@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"strings"
 	"testing"
 
 	"greenlight/internal/assert"
@@ -123,4 +124,72 @@ func TestMaxBytes(t *testing.T) {
 	// MaxBytes counts bytes, matching what the database column limits.
 	assert.Equal(t, MaxBytes("é", 2), true)
 	assert.Equal(t, MaxBytes("é", 1), false)
+}
+
+// FuzzEmailRX fuzzes the email regular expression.
+//
+// EmailRX is the only regexp in the codebase, and it runs on an unauthenticated
+// request body (POST /v1/users), which makes it worth more scrutiny than its
+// size suggests.
+//
+// The property that actually matters here is NOT "does it accept the right
+// addresses" — that's a judgement call the table tests above pin down. It's
+// that **an accepted address can never contain a line break**.
+//
+// Here's why. A validated email address is handed to the mailer, which puts it
+// in a `To:` header. Headers are separated by CRLF, so an address like
+//
+//	victim@example.com\r\nBcc: everyone@example.com
+//
+// would let a registering user inject arbitrary SMTP headers — a classic
+// header-injection vulnerability. Go's regexp `$` matches at end of TEXT rather
+// than end of line (there's no (?m) flag here), so the anchors already prevent
+// this. But "already prevents it" is exactly the kind of property that a
+// well-meaning change to the pattern can quietly undo, and nothing else in the
+// suite would notice.
+func FuzzEmailRX(f *testing.F) {
+	seeds := []string{
+		"alice@example.com",
+		"alice+tag@example.co.uk",
+		"a@b.io",
+		"",
+		"@example.com",
+		"alice@",
+		"alice@@example.com",
+		"alice example.com",
+		"alice@example.com\r\nBcc: mallory@evil.example",
+		"alice@example.com\nX-Injected: yes",
+		"alice@exa mple.com",
+		"ALICE@EXAMPLE.COM",
+		strings.Repeat("a", 300) + "@example.com",
+	}
+
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, email string) {
+		// Property 1: no panic, and it returns.
+		if !Matches(email, EmailRX) {
+			return
+		}
+
+		// Property 2: an accepted address contains no CR or LF, so it can never
+		// be used to inject an SMTP header.
+		if strings.ContainsAny(email, "\r\n") {
+			t.Fatalf("EmailRX accepted %q, which contains a line break; this permits SMTP header injection", email)
+		}
+
+		// Property 3: exactly one @, so the address can be split into a local
+		// part and a domain unambiguously.
+		if got := strings.Count(email, "@"); got != 1 {
+			t.Errorf("EmailRX accepted %q with %d '@' characters; want exactly 1", email, got)
+		}
+
+		// Property 4: no leading or trailing whitespace, which would otherwise
+		// be stored in the database and break the COLLATE NOCASE lookups.
+		if email != strings.TrimSpace(email) {
+			t.Errorf("EmailRX accepted %q, which has surrounding whitespace", email)
+		}
+	})
 }

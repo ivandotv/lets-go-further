@@ -16,6 +16,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -24,17 +25,45 @@ import (
 	"greenlight/internal/validator"
 )
 
+// config holds everything the seeder needs, so that run() takes plain values
+// rather than reading global flag state.
+//
+// Splitting it out this way is what makes run() testable: the global
+// flag.CommandLine set can only be parsed once per process, so a run() that
+// called flag.Parse() itself could never be exercised twice from a test binary.
+type config struct {
+	dsn        string
+	email      string
+	password   string
+	fixedToken string
+}
+
 func main() {
-	if err := run(); err != nil {
+	cfg, err := parseFlags(os.Args[1:])
+	if err != nil {
+		// flag itself has already printed the usage message.
+		os.Exit(1)
+	}
+
+	if err := run(cfg, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %s\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	dsn := flag.String("db-dsn", "greenlight.db", "SQLite database file path")
-	email := flag.String("email", "demo@example.com", "Email address for the demo user")
-	password := flag.String("password", "pa55word1234", "Password for the demo user")
+// parseFlags builds a config from command-line arguments.
+//
+// It uses its own FlagSet rather than the package-level one, with
+// ContinueOnError so a bad argument returns instead of calling os.Exit — which
+// would take a test binary down with it.
+func parseFlags(args []string) (config, error) {
+	var cfg config
+
+	fs := flag.NewFlagSet("seed", flag.ContinueOnError)
+
+	fs.StringVar(&cfg.dsn, "db-dsn", "greenlight.db", "SQLite database file path")
+	fs.StringVar(&cfg.email, "email", "demo@example.com", "Email address for the demo user")
+	fs.StringVar(&cfg.password, "password", "pa55word1234", "Password for the demo user")
 
 	// Fixed rather than randomly generated, so re-running this command — or
 	// just re-reading the README — always gets you the same value. That means
@@ -46,18 +75,29 @@ func run() error {
 	// other than TokenModel.New's crypto/rand generation. Nobody else has your
 	// SQLite file, so a known plaintext is no more sensitive than a well-known
 	// local "postgres/postgres" dev credential.
-	fixedToken := flag.String("token", "GREENLIGHT0000000000000000",
+	fs.StringVar(&cfg.fixedToken, "token", "GREENLIGHT0000000000000000",
 		"Fixed plaintext authentication token to seed for the demo user (must be 26 characters)")
 
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		return config{}, err
+	}
 
+	return cfg, nil
+}
+
+// run does the seeding, writing its progress to out.
+//
+// Taking an io.Writer rather than printing to stdout directly means a test can
+// assert on what the command reports, which is most of its user-visible
+// behaviour.
+func run(cfg config, out io.Writer) error {
 	v := validator.New()
-	if data.ValidateTokenPlaintext(v, *fixedToken); !v.Valid() {
+	if data.ValidateTokenPlaintext(v, cfg.fixedToken); !v.Valid() {
 		return fmt.Errorf("invalid -token: %s", v.Errors["token"])
 	}
 
 	database, err := db.OpenDB(db.Config{
-		DSN:          *dsn,
+		DSN:          cfg.dsn,
 		MaxOpenConns: 2,
 		MaxIdleConns: 2,
 		MaxIdleTime:  time.Minute,
@@ -82,25 +122,25 @@ func run() error {
 	// starts deactivated with only movies:read.)
 	user := &data.User{
 		Name:      "Demo User",
-		Email:     *email,
+		Email:     cfg.email,
 		Activated: true,
 	}
 
-	if err := user.Password.Set(*password); err != nil {
+	if err := user.Password.Set(cfg.password); err != nil {
 		return err
 	}
 
 	err = models.Users.Insert(user)
 	switch {
 	case err == nil:
-		fmt.Printf("created user %s\n", user.Email)
+		fmt.Fprintf(out, "created user %s\n", user.Email)
 
 	case errors.Is(err, data.ErrDuplicateEmail):
 		// Make the command re-runnable: if the user already exists, look them
 		// up and carry on rather than failing.
-		fmt.Printf("user %s already exists, reusing it\n", *email)
+		fmt.Fprintf(out, "user %s already exists, reusing it\n", cfg.email)
 
-		user, err = models.Users.GetByEmail(*email)
+		user, err = models.Users.GetByEmail(cfg.email)
 		if err != nil {
 			return err
 		}
@@ -141,7 +181,7 @@ func run() error {
 	}
 
 	if len(existing) > 0 {
-		fmt.Println("movies table is not empty, skipping sample movies")
+		fmt.Fprintln(out, "movies table is not empty, skipping sample movies")
 	} else {
 		for _, m := range movies {
 			movie := &data.Movie{
@@ -156,7 +196,7 @@ func run() error {
 			}
 		}
 
-		fmt.Printf("inserted %d sample movies\n", len(movies))
+		fmt.Fprintf(out, "inserted %d sample movies\n", len(movies))
 	}
 
 	// ── A fixed authentication token to use straight away ────────────────────
@@ -168,10 +208,10 @@ func run() error {
 		return err
 	}
 
-	hash := sha256.Sum256([]byte(*fixedToken))
+	hash := sha256.Sum256([]byte(cfg.fixedToken))
 
 	token := &data.Token{
-		Plaintext: *fixedToken,
+		Plaintext: cfg.fixedToken,
 		Hash:      hash[:],
 		UserID:    user.ID,
 		// Long enough that it never practically expires in local dev. There's
@@ -185,7 +225,7 @@ func run() error {
 		return err
 	}
 
-	fmt.Printf(`
+	fmt.Fprintf(out, `
 Demo user ready.
 
   email:    %s
@@ -200,7 +240,7 @@ required. Or try it directly:
 
   curl -H "Authorization: Bearer %s" localhost:4000/v1/movies
 
-`, user.Email, *password, token.Plaintext, token.Plaintext)
+`, user.Email, cfg.password, token.Plaintext, token.Plaintext)
 
 	return nil
 }

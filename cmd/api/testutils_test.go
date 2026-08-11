@@ -53,6 +53,11 @@ type mockMailer struct {
 	mu      sync.Mutex
 	sent    []mockEmail
 	sendErr error
+
+	// sendDelay makes Send take a measurable amount of time, so a test can
+	// ensure background work is still in flight when something else happens —
+	// used by the graceful-shutdown test to prove shutdown waits for it.
+	sendDelay time.Duration
 }
 
 type mockEmail struct {
@@ -62,6 +67,16 @@ type mockEmail struct {
 }
 
 func (m *mockMailer) Send(recipient, templateFile string, data any) error {
+	// Read the delay before taking the lock, so a slow "send" doesn't block a
+	// test that's only trying to read what's been sent so far.
+	m.mu.Lock()
+	delay := m.sendDelay
+	m.mu.Unlock()
+
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -86,33 +101,42 @@ func (m *mockMailer) messages() []mockEmail {
 	return append([]mockEmail(nil), m.sent...)
 }
 
-// waitForEmail blocks until at least n emails have been sent, or the test
-// times out.
+// waitForEmail blocks until the application's background work has finished,
+// then returns everything sent — failing the test if fewer than n arrived.
 //
 // This is necessary because registerUserHandler sends mail from a BACKGROUND
-// goroutine — the HTTP response comes back before the email is recorded. Simply
-// checking immediately after the request would be a race, passing or failing
+// goroutine: the HTTP response comes back before the email is recorded, so
+// checking immediately after the request would be a race that passes or fails
 // depending on scheduling.
 //
-// Polling like this is crude but reliable and easy to read. (The alternative —
-// a channel the mock signals on — is tidier but adds machinery to a test
-// helper, and this loop makes the underlying concurrency visible, which is the
-// more useful thing in a learning project.)
-func (m *mockMailer) waitForEmail(t *testing.T, n int) []mockEmail {
+// ── WHY wg.Wait() RATHER THAN POLLING ────────────────────────────────────────
+//
+// This used to poll every 5ms against a 2-second deadline. That works, but it's
+// guessing: it's slow when the goroutine is slow, and it can only ever report
+// "it didn't happen within 2 seconds" rather than "it didn't happen".
+//
+// app.background() (main.go) registers every goroutine it starts on app.wg, and
+// that's the same WaitGroup graceful shutdown blocks on. So waiting on it here
+// is exact — it returns the instant the work is done, and if the work never
+// completes the test hangs and the panic dump names the stuck goroutine, which
+// is far more useful than a timeout message.
+//
+// (synctest.Wait() is the other modern option, but it doesn't apply here:
+// requests reach the handler over a real socket via httptest.Server, whose
+// goroutines are outside any synctest bubble — so the background mail goroutine
+// would be invisible to it. synctest is used in this suite where the code under
+// test is reached directly; see internal/mailer for an example.)
+func (m *mockMailer) waitForEmail(t *testing.T, app *application, n int) []mockEmail {
 	t.Helper()
 
-	deadline := time.Now().Add(2 * time.Second)
+	app.wg.Wait()
 
-	for time.Now().Before(deadline) {
-		if msgs := m.messages(); len(msgs) >= n {
-			return msgs
-		}
-		time.Sleep(5 * time.Millisecond)
+	msgs := m.messages()
+	if len(msgs) < n {
+		t.Fatalf("got %d email(s) after all background work completed; want at least %d", len(msgs), n)
 	}
 
-	t.Fatalf("timed out waiting for %d email(s); got %d", n, len(m.messages()))
-
-	return nil
+	return msgs
 }
 
 // newTestApplication builds an application wired to a fresh database and a

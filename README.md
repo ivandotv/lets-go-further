@@ -600,12 +600,40 @@ responses, so an attacker can't enumerate which addresses have accounts.
 make test          # everything, with the race detector
 make test/short    # only the fast unit tests
 make test/cover    # open an HTML coverage report
+make test/fuzz     # 30s of fuzzing per package
+make test/bench    # benchmarks, with allocation counts
 make audit         # fmt + vet + tidy + test -race
 ```
 
-Current coverage: **`internal/validator` 100%, `internal/data` 91%,
-`cmd/api` 70%** (the uncovered part of `cmd/api` is mostly `main`/`run`/`serve`,
-which is process wiring).
+Current coverage: **`internal/validator` 100%, `internal/mailer` 93%,
+`internal/data` 91%, `internal/db` 84%, `cmd/api` 81%, `cmd/seed` 73%** —
+**84% across the module**. Most of what's left is `main`/`run`, which is process
+wiring.
+
+> **A note on measuring it.** `make test/cover` passes `-coverpkg=./...`. Without
+> it, `go test -cover` only instruments the package whose tests are running, so
+> `internal/db` reported **0%** despite being exercised by nearly every test in
+> the repo through `internal/testutil`. If a package looks suspiciously
+> uncovered, check whether it's only ever reached from other packages before
+> concluding it's untested.
+
+**One external test dependency: `github.com/google/go-cmp`.** Everything else is
+the standard library. It's there because `assert.Equal` is constrained to
+`comparable`, which rules out the types this codebase compares most —
+`data.Genres` (a slice), `[]*data.Movie`, and the validator's
+`map[string]string`. `assert.DeepEqual` wraps `cmp.Diff` and prints a readable
+diff instead of two dumped structs. Notably **not** added: testify (the project
+deliberately hand-rolls three assertion helpers instead — see
+`internal/assert/assert.go`), an HTTP assertion DSL (the `testServer` harness is
+100 readable lines), or any database mock.
+
+The full guide to the suite — every command, the conventions, and the Go testing
+machinery it uses — is in
+[`internal/testutil/doc.go`](internal/testutil/doc.go):
+
+```bash
+go doc greenlight/internal/testutil
+```
 
 ### Two layers of tests
 
@@ -647,6 +675,35 @@ that are easy to break and expensive to get wrong:
 - **Password hashes never appearing in a response.**
 - **Login failures being indistinguishable** from each other.
 - **Panic recovery** returning a clean 500 without leaking the panic value.
+- **Every PRAGMA reaching every pooled connection** — `internal/db` checks out
+  four connections *simultaneously* and asserts on all of them, which is what
+  defeats the naive "run `PRAGMA foreign_keys = ON` once at startup" mistake
+  that a single-connection test would happily pass.
+- **Graceful shutdown**, driven by a real `SIGTERM`: in-flight requests finish
+  and the background welcome email completes before `serve()` returns.
+- **The rate limiter being per-client**, so one noisy address can't lock
+  everyone out.
+- **Concurrent writers**, which is where `busy_timeout` and WAL earn their keep.
+
+### Three kinds of test beyond the usual
+
+**Concurrency** (`internal/data/concurrency_test.go`). Twenty goroutines writing
+at once, proving `busy_timeout` turns SQLite's single-writer lock into a small
+latency blip rather than a hard `SQLITE_BUSY` error. Two goroutines racing the
+same update, proving exactly one wins and no write is lost. Readers running
+during writes, which is the WAL journal mode doing its job. All under `-race`.
+
+**Fuzzing.** Four targets, on the functions that parse untrusted bytes by hand:
+`Runtime.UnmarshalJSON`, `Genres.Scan`, `readJSON`, and the email regexp. They
+assert *properties* rather than outputs — "never panics", "anything accepted
+round-trips unchanged", and for the email regexp, "an accepted address can never
+contain a line break", which is what prevents SMTP header injection. Any crasher
+found gets written to `testdata/fuzz/` and becomes a permanent regression test.
+
+**Benchmarks.** Not for optimisation — as a tripwire and as documentation. Run
+`make test/bench` and the "~250ms by design" claim about bcrypt below stops
+being a claim. They also show the `LIMIT/OFFSET` pagination cost climbing on
+deep pages, and what `json.MarshalIndent` costs on every response.
 
 ### A useful trick: `data.BcryptCost`
 
@@ -678,6 +735,20 @@ Deliberate changes, all of them explained in comments at the site:
    binary, lets tests build a real schema with no external tooling, and makes it
    impossible for the schema to drift from the binary. The CLI still works
    against `migrations/` if you prefer.
+
+   > ⚠️ **One caveat, found while writing the tests for this.** Two processes
+   > migrating the *same* database file at the *same moment* will wedge it:
+   > golang-migrate marks `schema_migrations` dirty before applying a migration
+   > and clears it afterwards, and its SQLite driver takes no advisory lock — so
+   > the loser of the race leaves `Dirty database version 1. Fix and force
+   > version.` behind, needing a manual `migrate force` to recover.
+   >
+   > In practice this only bites if you start two servers against one file
+   > simultaneously (`make run/api` twice, or a restart overlapping a boot).
+   > Sequential restarts are fine and are covered by
+   > `TestMigrateUpAcrossRestarts`. It's a property of golang-migrate's SQLite
+   > driver rather than of this code, so it's documented here rather than
+   > worked around.
 
 4. **`log/slog`** instead of the book's hand-rolled `jsonlog`.
 
