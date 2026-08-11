@@ -174,8 +174,16 @@
 // FAKE clock: time only advances when every goroutine in the bubble is blocked,
 // so a function that sleeps for a second finishes instantly and deterministically.
 //
-// internal/mailer/mailer_test.go uses it to test a retry loop with two 500ms
-// sleeps in zero real time. The catch is that a bubble must be self-contained —
-// goroutines started outside it are invisible, and one that never exits fails
-// the test — so it doesn't suit tests that go over a real network socket.
+// Two places use it. internal/mailer/mailer_test.go tests a retry loop with two
+// 500ms sleeps in zero real time. cmd/api/middleware_test.go tests the rate
+// limiter's janitor, which sweeps once a minute and evicts after three — a
+// four-minute test at real speed.
+//
+// The catch is that a bubble must be self-contained: goroutines started outside
+// it are invisible, and one started inside that never exits FAILS the test with
+// a deadlock panic. That rules it out for anything going over a real network
+// socket, but it also turns out to be a feature — "did this goroutine shut
+// down?" is otherwise an awkward thing to assert, and inside a bubble you get it
+// for free. See TestRateLimitJanitorExitsOnShutdown, whose entire assertion is
+// that the test finishes at all.
 package testutil

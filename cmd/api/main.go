@@ -108,6 +108,38 @@ type application struct {
 	// A sync.WaitGroup must not be copied after first use, which is one reason
 	// application is always passed around as a POINTER.
 	wg sync.WaitGroup
+
+	// shutdown is closed by stop() when the application is winding down.
+	//
+	// It's for long-lived loops that aren't tied to a single request and so
+	// can't be tracked by wg — currently just the rate limiter's client-map
+	// janitor. Those select on it and return.
+	//
+	// wg and shutdown solve opposite halves of the same problem, and it's worth
+	// keeping them straight: wg means "wait for this work to FINISH", shutdown
+	// means "tell this loop to STOP". Waiting on an infinite loop would hang
+	// forever, and telling a half-sent email to stop would lose it.
+	//
+	// A nil channel blocks forever on receive, so leaving this unset simply
+	// means "never shut down" — which keeps every existing construction of
+	// application valid without change.
+	shutdown chan struct{}
+
+	// stopOnce guards shutdown against a double close, which would panic.
+	// serve() and a test's cleanup can both reasonably call stop().
+	stopOnce sync.Once
+}
+
+// stop signals the application's long-lived background loops to exit.
+//
+// Safe to call more than once, and safe to call on an application that never
+// had its shutdown channel initialised.
+func (app *application) stop() {
+	app.stopOnce.Do(func() {
+		if app.shutdown != nil {
+			close(app.shutdown)
+		}
+	})
 }
 
 func main() {
@@ -234,6 +266,10 @@ func run() error {
 		logger: logger,
 		models: data.NewModels(database),
 		mailer: newMailer(cfg, logger),
+		// Initialised here rather than being left nil, so the background loops
+		// started by the middleware chain actually exit on shutdown. See the
+		// field's comment, and app.stop() in serve().
+		shutdown: make(chan struct{}),
 	}
 
 	return app.serve()

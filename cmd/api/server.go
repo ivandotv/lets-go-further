@@ -73,6 +73,14 @@ func (app *application) serve() error {
 			return
 		}
 
+		// Tell the long-lived background loops to stop. These aren't tracked by
+		// app.wg — they never "finish", so waiting on them would hang — so they
+		// get a signal instead. Right now that's the rate limiter's janitor.
+		//
+		// This happens AFTER srv.Shutdown returns, so nothing is still serving
+		// requests that might depend on them.
+		app.stop()
+
 		// The HTTP requests are done, but background goroutines started via
 		// app.background() may still be running (sending a welcome email, say).
 		// Wait for those too before declaring shutdown complete.

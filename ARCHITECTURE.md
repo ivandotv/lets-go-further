@@ -248,6 +248,13 @@ still runs on the way out.
   `recoverPanic` middleware only protects the request's own goroutine — a
   panic in a spawned goroutine kills the whole process otherwise, so
   `app.background()` wraps every background task in its own `recover`.
+- **Two mechanisms for background goroutines, solving opposite problems.**
+  `app.wg` means *wait for this work to finish* — it tracks per-request tasks
+  like sending a welcome email, and graceful shutdown blocks on it.
+  `app.shutdown` means *tell this loop to stop* — it's a channel closed by
+  `app.stop()`, which long-lived loops (currently the rate limiter's client-map
+  janitor) select on. Waiting on an endless loop would hang forever; telling a
+  half-sent email to stop would lose it.
 
 ---
 

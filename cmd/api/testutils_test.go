@@ -168,7 +168,16 @@ func newTestApplication(t *testing.T) (*application, *mockMailer) {
 		logger: logger,
 		models: data.NewModels(testutil.NewDB(t)),
 		mailer: mailer,
+		// Without this the rate limiter's janitor goroutine would run until the
+		// test BINARY exits, not until this test does — so a full run would
+		// accumulate one per test. Harmless in itself, but it makes any
+		// goroutine-leak check (testing/synctest, goleak) useless, and it means
+		// the janitor's own behaviour can't be tested.
+		shutdown: make(chan struct{}),
 	}
+
+	// Cleanup runs when the test and all its subtests finish.
+	t.Cleanup(app.stop)
 
 	return app, mailer
 }

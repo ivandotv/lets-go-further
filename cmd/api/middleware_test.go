@@ -2,8 +2,11 @@ package main
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"greenlight/internal/assert"
@@ -334,6 +337,164 @@ func TestRateLimitRefills(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	assert.Equal(t, getAsClient(t, ts, "/v1/healthcheck", ip), http.StatusOK)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE RATE LIMITER'S JANITOR
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// rateLimit keeps a map of one *rate.Limiter per client IP, and a background
+// goroutine sweeps entries that haven't been seen for three minutes. Without
+// that sweep the map grows by one entry per IP that ever connects, which on a
+// public API is a trivial way to exhaust the server's memory.
+//
+// Both tests below run inside a synctest bubble, for two different reasons.
+//
+// The first needs FAKE TIME: the janitor wakes once a minute and evicts after
+// three, so testing it for real would mean a four-minute test. Inside a bubble
+// the clock only advances when every goroutine is blocked, so four minutes pass
+// instantly and deterministically.
+//
+// The second needs the bubble's GOROUTINE ACCOUNTING: synctest.Test fails if a
+// goroutine started inside the bubble is still running when the test body
+// returns. That turns "did the janitor actually exit?" — normally an awkward
+// thing to assert — into something the framework checks for us.
+
+// TestRateLimitJanitorEvictsStaleClients checks the sweep actually happens.
+func TestRateLimitJanitorEvictsStaleClients(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		app := &application{
+			logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+			shutdown: make(chan struct{}),
+		}
+
+		app.config.limiter.enabled = true
+		// ── Choosing these numbers carefully ─────────────────────────────────
+		//
+		// A very slow refill is what makes this test meaningful. With burst 1
+		// and 0.001 requests/second, a client gets one request and then waits
+		// ~16 minutes for the next token.
+		//
+		// So when the same IP is allowed through again after only four minutes,
+		// there is exactly one explanation: its entry was evicted and a BRAND
+		// NEW limiter — with a full burst — was created for it. With a
+		// realistic rate the bucket would have refilled on its own and the test
+		// would pass whether or not the janitor did anything.
+		app.config.limiter.rps = 0.001
+		app.config.limiter.burst = 1
+
+		handler := app.rateLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		const ip = "203.0.113.42"
+
+		// Burn the single token.
+		assert.Equal(t, callWithIP(handler, ip), http.StatusOK)
+		// Nothing left, and nothing due for a quarter of an hour.
+		assert.Equal(t, callWithIP(handler, ip), http.StatusTooManyRequests)
+
+		// Four minutes of fake time: past the janitor's one-minute tick and its
+		// three-minute staleness threshold, but nowhere near a refill.
+		time.Sleep(4 * time.Minute)
+
+		// synctest.Wait blocks until every other goroutine in the bubble is
+		// durably blocked — i.e. the janitor has finished its sweep and gone
+		// back to waiting on the ticker. Without it we could look at the map
+		// mid-sweep.
+		synctest.Wait()
+
+		if got := callWithIP(handler, ip); got != http.StatusOK {
+			t.Errorf("got %d after 4 minutes idle; want 200 — the janitor should have evicted the stale client and given it a fresh limiter", got)
+		}
+
+		// Let the janitor exit, or the bubble reports it as leaked.
+		app.stop()
+		synctest.Wait()
+	})
+}
+
+// TestRateLimitJanitorExitsOnShutdown is the direct test of the exit path.
+//
+// The assertion is invisible: if the janitor ignored app.shutdown and kept
+// looping, it would still be running when this function returns, and
+// synctest.Test would fail the test with a leaked-goroutine panic. Restore the
+// book's `for { time.Sleep(time.Minute) }` and this goes red.
+//
+// That's also why the janitor needed an exit path at all — without one, no test
+// in this package could use a bubble, because every call to routes() would
+// leave a goroutine behind.
+func TestRateLimitJanitorExitsOnShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		app := &application{
+			logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+			shutdown: make(chan struct{}),
+		}
+		app.config.limiter.enabled = true
+		app.config.limiter.rps = 100
+		app.config.limiter.burst = 100
+
+		handler := app.rateLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		// Put a client in the map so the janitor has something to look at.
+		assert.Equal(t, callWithIP(handler, "203.0.113.1"), http.StatusOK)
+
+		// Let it complete a couple of sweeps first, so we're testing that a
+		// RUNNING loop stops — not that it never started.
+		time.Sleep(2 * time.Minute)
+		synctest.Wait()
+
+		app.stop()
+
+		// If the janitor is well-behaved it returns here. If not, synctest
+		// fails the test when this function returns.
+		synctest.Wait()
+	})
+}
+
+// TestApplicationStopIsIdempotent checks that stop() can be called twice.
+//
+// It's easy to dismiss this as trivial, but closing an already-closed channel
+// PANICS in Go, and there are two callers that can both reasonably fire: serve()
+// on its shutdown path, and a test's t.Cleanup. Without the sync.Once guarding
+// it, that combination would take the process down during shutdown — the worst
+// possible moment.
+func TestApplicationStopIsIdempotent(t *testing.T) {
+	app := &application{shutdown: make(chan struct{})}
+
+	app.stop()
+	app.stop()
+	app.stop()
+
+	select {
+	case <-app.shutdown:
+		// Closed, as expected.
+	default:
+		t.Error("shutdown channel was not closed by stop()")
+	}
+
+	// And an application that never had the channel initialised — every
+	// construction in the older tests, and anything a reader writes by hand —
+	// must not panic either.
+	(&application{}).stop()
+}
+
+// callWithIP runs one request through a handler as the given client IP and
+// returns the status.
+//
+// This drives the handler directly rather than over a socket, which is what
+// makes it usable inside a synctest bubble: a real network connection would
+// involve goroutines outside the bubble, and the fake clock would never advance.
+func callWithIP(h http.Handler, ip string) int {
+	r := httptest.NewRequest(http.MethodGet, "/v1/healthcheck", nil)
+	r.Header.Set("X-Forwarded-For", ip)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, r)
+
+	return rr.Code
 }
 
 // getAsClient issues a GET presenting itself as the given client IP.

@@ -65,11 +65,13 @@ func TestServeGracefulShutdown(t *testing.T) {
 	mailer := &mockMailer{}
 
 	app := &application{
-		config: cfg,
-		logger: logger,
-		models: data.NewModels(testutil.NewDB(t)),
-		mailer: mailer,
+		config:   cfg,
+		logger:   logger,
+		models:   data.NewModels(testutil.NewDB(t)),
+		mailer:   mailer,
+		shutdown: make(chan struct{}),
 	}
+	t.Cleanup(app.stop)
 
 	serveErr := make(chan error, 1)
 
@@ -151,11 +153,15 @@ func TestServeReturnsErrorOnUnavailablePort(t *testing.T) {
 	cfg.env = "testing"
 
 	app := &application{
-		config: cfg,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		models: data.NewModels(testutil.NewDB(t)),
-		mailer: &mockMailer{},
+		config:   cfg,
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		models:   data.NewModels(testutil.NewDB(t)),
+		mailer:   &mockMailer{},
+		shutdown: make(chan struct{}),
 	}
+	// serve() returns early on a bind failure without reaching its shutdown
+	// path, so the janitor it started needs stopping here.
+	t.Cleanup(app.stop)
 
 	done := make(chan error, 1)
 	go func() { done <- app.serve() }()

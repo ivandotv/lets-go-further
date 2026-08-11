@@ -109,9 +109,16 @@ greenlight/internal/testutil`) before adding tests; don't re-derive it here.
   `Genres.Scan`, `readJSON`, `EmailRX`), **concurrency tests** in
   `internal/data/concurrency_test.go` that guard `busy_timeout`/WAL/optimistic
   locking, and **benchmarks**. `testing/synctest` (stdlib, Go 1.25+) is used in
-  `internal/mailer` to test the retry loop's sleeps in zero real time — it does
-  not suit tests that go over a real socket, since bubble goroutines must be
-  self-contained.
+  `internal/mailer` for the retry loop's sleeps and in `cmd/api` for the rate
+  limiter's janitor — it does not suit tests that go over a real socket, since
+  bubble goroutines must be self-contained.
+- Long-lived background loops started by middleware select on `app.shutdown`
+  and exit when `app.stop()` closes it. `run()` initialises the channel and
+  `serve()` calls `stop()`; `newTestApplication` does both via `t.Cleanup`.
+  A nil `shutdown` means "never stop", so hand-built `&application{}` literals
+  in tests stay valid. Don't reintroduce a `for { time.Sleep(...) }` loop with
+  no exit — `TestRateLimitJanitorExitsOnShutdown` fails the whole binary if you
+  do, and it would block any future use of synctest in this package.
 
 ## Things worth knowing before touching SQL or migrations
 

@@ -129,10 +129,15 @@ func BenchmarkReadJSON(b *testing.B) {
 // being paid by every endpoint, not just the one that motivated it.
 func BenchmarkMiddlewareChain(b *testing.B) {
 	app := &application{
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mailer: &mockMailer{},
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		mailer:   &mockMailer{},
+		shutdown: make(chan struct{}),
 	}
 	app.config.limiter.enabled = false
+
+	// routes() starts the rate limiter's janitor goroutine; stop it when the
+	// benchmark is done rather than leaving it running for the whole binary.
+	defer app.stop()
 
 	handler := app.routes()
 
@@ -149,9 +154,12 @@ func BenchmarkMiddlewareChain(b *testing.B) {
 // become contended under real load.
 func BenchmarkMiddlewareChainWithRateLimit(b *testing.B) {
 	app := &application{
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mailer: &mockMailer{},
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		mailer:   &mockMailer{},
+		shutdown: make(chan struct{}),
 	}
+	defer app.stop()
+
 	app.config.limiter.enabled = true
 	// High enough that the benchmark never trips it.
 	app.config.limiter.rps = 1_000_000

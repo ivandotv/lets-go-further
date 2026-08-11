@@ -95,17 +95,44 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 	// Background janitor: without it, `clients` grows forever — one entry per
 	// IP that ever connected. That's an unbounded memory leak, and on a public
 	// API it's a trivial way to exhaust the server's memory.
+	//
+	// ── WHY THIS LOOP HAS AN EXIT ────────────────────────────────────────────
+	//
+	// The book writes this as `for { time.Sleep(time.Minute); ... }`, with no
+	// way out. In production that's nearly harmless: routes() is called once, so
+	// it's a single goroutine that lives as long as the process.
+	//
+	// It's still worth closing, for two reasons. It's a goroutine that outlives
+	// the graceful shutdown that serve() works so hard to get right — the
+	// process waits for in-flight requests and background email, then exits with
+	// this still running. And in a test binary, routes() is called once per
+	// test, so the goroutines accumulate; anything that checks for leaked
+	// goroutines (testing/synctest, goleak) trips over it immediately, which is
+	// what makes the janitor's behaviour hard to test at all.
+	//
+	// app.shutdown is nil unless someone set it, and a receive on a nil channel
+	// blocks forever — so the default behaviour is exactly the book's, and only
+	// callers that opt in (run() and the test harness) get the exit.
 	go func() {
-		for {
-			time.Sleep(time.Minute)
+		// A ticker rather than Sleep, so the sweep interval doesn't drift by
+		// however long the sweep itself took.
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
 
-			mu.Lock()
-			for ip, c := range clients {
-				if time.Since(c.lastSeen) > 3*time.Minute {
-					delete(clients, ip)
+		for {
+			select {
+			case <-ticker.C:
+				mu.Lock()
+				for ip, c := range clients {
+					if time.Since(c.lastSeen) > 3*time.Minute {
+						delete(clients, ip)
+					}
 				}
+				mu.Unlock()
+
+			case <-app.shutdown:
+				return
 			}
-			mu.Unlock()
 		}
 	}()
 

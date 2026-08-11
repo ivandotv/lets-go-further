@@ -582,6 +582,32 @@ in any other goroutine kills the entire process.** So `app.background()` wraps
 every background task with its own `recover`, plus a `sync.WaitGroup` so
 graceful shutdown waits for in-flight work.
 
+### Two mechanisms for background goroutines
+
+There are two kinds of goroutine here, and they need opposite treatment:
+
+| | Mechanism | Meaning |
+|---|---|---|
+| Per-request work (welcome email) | `app.wg` | *Wait for this to **finish**.* |
+| Long-lived loops (rate-limiter janitor) | `app.shutdown` + `app.stop()` | *Tell this to **stop**.* |
+
+Mixing them up doesn't work in either direction. `wg.Wait()` on a loop that never
+returns hangs forever; signalling a half-sent email to stop just loses the email.
+So `serve()` does both, in order: `srv.Shutdown()` drains in-flight requests,
+`app.stop()` closes the channel the endless loops select on, then `app.wg.Wait()`
+waits for the email to land.
+
+The book writes the janitor as a bare `for { time.Sleep(time.Minute); ... }` with
+no way out — nearly harmless in production, since `routes()` is called once. It's
+still worth closing: it's a goroutine that outlives the graceful shutdown the
+rest of `serve()` works hard to get right, and in a test binary `routes()` runs
+once *per test*, so the goroutines pile up and defeat any leak detection.
+
+`app.shutdown` is nil unless someone sets it, and **a receive on a nil channel
+blocks forever** — so an `&application{}` built by hand behaves exactly as
+before, and only `run()` and the test harness opt in. That Go detail is what
+kept this from becoming a change to every construction site.
+
 ### Errors don't leak internals
 
 A 500 tells the client only *"the server encountered a problem"*. The actual

@@ -803,6 +803,10 @@
           <h3>Background work gets its own recovery</h3>
           <p><code>recoverPanic</code> only guards the request's goroutine — a panic in a spawned one kills the process otherwise, so <code>app.background()</code> wraps every background task in its own recover.</p>
         </div>
+        <div class="card">
+          <h3>Two mechanisms for background goroutines</h3>
+          <p><code>app.wg</code> means <em>wait for this to finish</em> — per-request work like a welcome email, which graceful shutdown blocks on. <code>app.shutdown</code> means <em>tell this loop to stop</em> — a channel closed by <code>app.stop()</code> that long-lived loops select on. Waiting on an endless loop would hang; telling a half-sent email to stop would lose it.</p>
+        </div>
       </div>
     </section>
 
