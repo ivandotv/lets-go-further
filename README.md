@@ -130,9 +130,9 @@ Two things that look like bugs but aren't:
 | `GET`    | `/v1/healthcheck`             | *public*        | Liveness and build info              |
 | `GET`    | `/v1/movies`                  | `movies:read`   | List movies (filter/sort/paginate)   |
 | `POST`   | `/v1/movies`                  | `movies:write`  | Create a movie                       |
-| `GET`    | `/v1/movies/:id`              | `movies:read`   | Show one movie                       |
-| `PATCH`  | `/v1/movies/:id`              | `movies:write`  | Partially update a movie             |
-| `DELETE` | `/v1/movies/:id`              | `movies:write`  | Delete a movie                       |
+| `GET`    | `/v1/movies/{id}`             | `movies:read`   | Show one movie                       |
+| `PATCH`  | `/v1/movies/{id}`             | `movies:write`  | Partially update a movie             |
+| `DELETE` | `/v1/movies/{id}`             | `movies:write`  | Delete a movie                       |
 | `POST`   | `/v1/users`                   | *public*        | Register (sends activation email)    |
 | `PUT`    | `/v1/users/activated`         | *public*        | Activate with an emailed token       |
 | `POST`   | `/v1/tokens/authentication`   | *public*        | Exchange credentials for a token     |
@@ -218,7 +218,7 @@ Take `GET /v1/movies/1` with a valid bearer token:
 │ logRequest        │  log method, URI, status, duration
 └─────────┬─────────┘
           ▼
-    httprouter          match the route, extract :id
+    http.ServeMux       match the route, extract {id}
           │
           ▼
   requirePermission("movies:read")
@@ -435,7 +435,6 @@ Chosen from across both books:
 
 | Package | Book | Used for |
 | ------- | ---- | -------- |
-| `julienschmidt/httprouter` | both | Routing with named parameters (`:id`) and per-method handlers. |
 | `justinas/alice` | Let's Go | Turns nested middleware wrapping into a readable list. |
 | `felixge/httpsnoop` | both | Captures the status code and bytes written for logging and metrics. Writing your own `ResponseWriter` wrapper silently breaks `Flusher`/`Hijacker`; this doesn't. |
 | `tomasen/realip` | Further | Extracts the client IP from `X-Forwarded-For` for per-client rate limiting. |
@@ -445,6 +444,7 @@ Chosen from across both books:
 | `golang-migrate/migrate/v4` | Further | Versioned schema migrations. |
 | `modernc.org/sqlite` | — | The database driver. |
 | `log/slog` | — | Structured JSON logging (stdlib). |
+| `net/http.ServeMux` | — | Routing with method-specific patterns and `{id}` wildcards (stdlib). |
 
 ### Why `modernc.org/sqlite` and not `mattn/go-sqlite3`?
 
@@ -461,6 +461,22 @@ that's a decisive advantage, and it's plenty fast.
 
 The book predates it and hand-rolls a `jsonlog` package. `log/slog` landed in
 Go 1.21, does the same job, and is now the idiomatic choice.
+
+### Why `net/http.ServeMux` instead of `julienschmidt/httprouter`?
+
+The book (and this project, originally) uses `httprouter` for method-specific
+routing and named path parameters. Go 1.22 added both directly to
+`http.ServeMux` — patterns like `"GET /v1/movies/{id}"` and
+`r.PathValue("id")` — so the dependency is no longer pulling its weight.
+
+The one thing `ServeMux` doesn't give you is a hook for custom 404/405 bodies.
+`routes.go` gets JSON versions of both without one: every path also gets a
+method-less fallback pattern (e.g. `"/v1/movies"` alongside `"GET
+/v1/movies"`), and per ServeMux's precedence rules a method-specific pattern
+is strictly more specific than the method-less one for the same path, so the
+fallback only ever fires when no registered method matches — exactly the 405
+case. A catch-all `"/"` pattern handles genuinely unmatched paths — the 404
+case.
 
 ---
 
@@ -676,6 +692,12 @@ Deliberate changes, all of them explained in comments at the site:
 
 8. **No `remote/` deployment scripts.** The book's chapter 21 deploys to an
    Ubuntu box with Caddy; that's orthogonal to the SQLite port.
+
+9. **Routing uses the standard library's `http.ServeMux`**, not the book's
+   `julienschmidt/httprouter`. Go 1.22 added method-specific patterns and
+   `{id}`-style wildcards to `ServeMux` itself, making the third-party router
+   unnecessary — see [Why `net/http.ServeMux` instead of
+   `httprouter`?](#why-nethttpservemux-instead-of-julienschmidthttprouter).
 
 ---
 

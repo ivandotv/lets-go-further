@@ -133,7 +133,7 @@ handler. The order is deliberate (see comments in `routes.go`):
   logRequest       log method, URI, status, duration once the handler is done
      │
      ▼
-  router (httprouter)   matches the URL, extracts path params like :id
+  router (http.ServeMux)   matches the URL, extracts path params like {id}
      │
      ▼
   requirePermission("movies:read")     ─┐

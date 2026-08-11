@@ -20,8 +20,9 @@ func TestHealthcheck(t *testing.T) {
 	assert.StringContains(t, body, `"environment": "testing"`)
 }
 
-// TestNotFoundAndMethodNotAllowed checks that httprouter's built-in plain-text
-// 404/405 responses were successfully overridden with our JSON ones.
+// TestNotFoundAndMethodNotAllowed checks that http.ServeMux's default
+// plain-text 404/405 responses were successfully overridden with our JSON
+// ones — see the fallback patterns registered in routes.go.
 //
 // A client should never have to handle two different error formats.
 func TestNotFoundAndMethodNotAllowed(t *testing.T) {

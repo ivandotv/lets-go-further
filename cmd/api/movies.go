@@ -67,7 +67,7 @@ func (app *application) createMovieHandler(w http.ResponseWriter, r *http.Reques
 
 // showMovieHandler returns a single movie.
 //
-//	GET /v1/movies/:id
+//	GET /v1/movies/{id}
 func (app *application) showMovieHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.readIDParam(r)
 	if err != nil {
@@ -93,7 +93,7 @@ func (app *application) showMovieHandler(w http.ResponseWriter, r *http.Request)
 
 // updateMovieHandler partially updates a movie.
 //
-//	PATCH /v1/movies/:id
+//	PATCH /v1/movies/{id}
 //
 // ── WHY POINTERS IN THE INPUT STRUCT ─────────────────────────────────────────
 //
@@ -179,7 +179,7 @@ func (app *application) updateMovieHandler(w http.ResponseWriter, r *http.Reques
 
 // deleteMovieHandler removes a movie.
 //
-//	DELETE /v1/movies/:id
+//	DELETE /v1/movies/{id}
 func (app *application) deleteMovieHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.readIDParam(r)
 	if err != nil {

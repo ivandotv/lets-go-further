@@ -59,7 +59,7 @@ func (app *application) notFoundResponse(w http.ResponseWriter, r *http.Request)
 }
 
 // methodNotAllowedResponse is sent when the URL exists but not for this HTTP
-// method (405). The book wires this into httprouter's MethodNotAllowed hook.
+// method (405). routes.go wires this in as a fallback pattern for each path.
 func (app *application) methodNotAllowedResponse(w http.ResponseWriter, r *http.Request) {
 	message := fmt.Sprintf("the %s method is not supported for this resource", r.Method)
 	app.errorResponse(w, r, http.StatusMethodNotAllowed, message)

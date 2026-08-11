@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/julienschmidt/httprouter"
-
 	"greenlight/internal/validator"
 )
 
@@ -35,16 +33,14 @@ import (
 // It's `map[string]any` so any handler can use it without declaring a type.
 type envelope map[string]any
 
-// readIDParam extracts the ":id" URL parameter and validates it.
+// readIDParam extracts the "{id}" URL wildcard and validates it.
 //
-// httprouter stores the matched parameters in the request context; this helper
+// http.ServeMux stores matched wildcards on the request itself; this helper
 // hides that detail (and the string→int conversion) from every handler that
 // needs an ID.
 func (app *application) readIDParam(r *http.Request) (int64, error) {
-	params := httprouter.ParamsFromContext(r.Context())
-
 	// Base 10, 64 bits — matching the int64 our IDs are stored as.
-	id, err := strconv.ParseInt(params.ByName("id"), 10, 64)
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
 		return 0, errors.New("invalid id parameter")
 	}
