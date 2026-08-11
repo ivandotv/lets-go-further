@@ -6,12 +6,12 @@
 //
 // # Running the tests
 //
-//	make test          # go test -race ./...      — the everyday command
-//	make test/short    # go test -short ./...     — skips anything touching a database
-//	make test/cover    # coverage, opens an HTML report in your browser
-//	make test/fuzz     # 30 seconds of fuzzing per package
-//	make test/bench    # benchmarks, with allocation counts
-//	make audit         # tidy + fmt + vet + test -race — run before finishing a change
+//	mise run test          # go test -race ./...      — the everyday command
+//	mise run test/short    # go test -short ./...     — skips anything touching a database
+//	mise run test/cover    # coverage, opens an HTML report in your browser
+//	mise run test/fuzz     # 30 seconds of fuzzing per package
+//	mise run test/bench    # benchmarks, with allocation counts
+//	mise run audit         # tidy + fmt + vet + test -race — run before finishing a change
 //
 // To run one test, or a group, pass a regular expression to -run:
 //
@@ -20,7 +20,7 @@
 //	go test ./... -run TestNothing              # matches nothing: a quick compile check
 //
 // -v prints each test name as it runs; without it you only see failures. -race
-// enables the race detector, which is why `make test` is slower than a bare
+// enables the race detector, which is why `mise run test` is slower than a bare
 // `go test` — it's worth it, and several tests here exist specifically to be run
 // under it.
 //
@@ -92,7 +92,7 @@
 //     below readable when something breaks.
 //
 //   - testing.Short() reports whether -short was passed. Database-backed tests
-//     check it and skip, so `make test/short` is a fast sanity check.
+//     check it and skip, so `mise run test/short` is a fast sanity check.
 //
 //   - TestMain(m *testing.M) runs once for the whole package, wrapping every
 //     test in it. Three packages here use it to drop the bcrypt cost — see
@@ -161,7 +161,7 @@
 //
 // -race instruments the binary to detect unsynchronised concurrent access. It
 // finds real bugs that don't reproduce reliably otherwise, which is why
-// `make test` always enables it.
+// `mise run test` always enables it.
 //
 // Worth understanding: it does NOT need two things to actually collide in wall
 // time. It tracks happens-before relationships, and reports accesses it can't

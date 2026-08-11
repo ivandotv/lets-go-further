@@ -817,12 +817,12 @@
       </div>
 
       <div class="tree">
-        <div class="tree-row"><div class="tree-path">make test</div><div class="tree-desc"><code>go test -race ./...</code> — the everyday command</div></div>
-        <div class="tree-row"><div class="tree-path">make test/short</div><div class="tree-desc">skips database-backed tests</div></div>
-        <div class="tree-row"><div class="tree-path">make test/cover</div><div class="tree-desc">coverage with <code>-coverpkg=./...</code>, opens an HTML report</div></div>
-        <div class="tree-row"><div class="tree-path">make test/fuzz</div><div class="tree-desc">30s of fuzzing per package</div></div>
-        <div class="tree-row"><div class="tree-path">make test/bench</div><div class="tree-desc">benchmarks with allocation counts</div></div>
-        <div class="tree-row"><div class="tree-path">make audit</div><div class="tree-desc">tidy + fmt + vet + test -race</div></div>
+        <div class="tree-row"><div class="tree-path">mise run test</div><div class="tree-desc"><code>go test -race ./...</code> — the everyday command</div></div>
+        <div class="tree-row"><div class="tree-path">mise run test/short</div><div class="tree-desc">skips database-backed tests</div></div>
+        <div class="tree-row"><div class="tree-path">mise run test/cover</div><div class="tree-desc">coverage with <code>-coverpkg=./...</code>, opens an HTML report</div></div>
+        <div class="tree-row"><div class="tree-path">mise run test/fuzz</div><div class="tree-desc">30s of fuzzing per package</div></div>
+        <div class="tree-row"><div class="tree-path">mise run test/bench</div><div class="tree-desc">benchmarks with allocation counts</div></div>
+        <div class="tree-row"><div class="tree-path">mise run audit</div><div class="tree-desc">tidy + fmt + vet + test -race</div></div>
       </div>
 
       <div class="prose">
@@ -856,7 +856,7 @@
         </div>
       </div>
 
-      <div class="callout"><strong>Measuring coverage —</strong> <code>make test/cover</code> passes <code>-coverpkg=./...</code>. Without it <code>go test -cover</code> instruments only the package under test, and <code>internal/db</code> reads <strong>0%</strong> despite being exercised by nearly every test in the repo through <code>internal/testutil</code>. Current: <code>validator</code> 100%, <code>mailer</code> 93%, <code>data</code> 91%, <code>db</code> 84%, <code>cmd/api</code> 81%, <code>cmd/seed</code> 73% — <strong>84% module-wide</strong>, the remainder mostly <code>main</code>/<code>run</code> process wiring.</div>
+      <div class="callout"><strong>Measuring coverage —</strong> <code>mise run test/cover</code> passes <code>-coverpkg=./...</code>. Without it <code>go test -cover</code> instruments only the package under test, and <code>internal/db</code> reads <strong>0%</strong> despite being exercised by nearly every test in the repo through <code>internal/testutil</code>. Current: <code>validator</code> 100%, <code>mailer</code> 93%, <code>data</code> 91%, <code>db</code> 84%, <code>cmd/api</code> 81%, <code>cmd/seed</code> 73% — <strong>84% module-wide</strong>, the remainder mostly <code>main</code>/<code>run</code> process wiring.</div>
     </section>
 
   </main>

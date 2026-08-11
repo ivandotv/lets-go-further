@@ -17,16 +17,17 @@ architecture and every place where SQLite forced a change from the book.
 ## Table of contents
 
 1. [Quickstart](#quickstart)
-2. [Trying it in Bruno](#trying-it-in-bruno)
-3. [API endpoints](#api-endpoints)
-4. [Project layout](#project-layout)
-5. [How a request flows through the app](#how-a-request-flows-through-the-app)
-6. [PostgreSQL → SQLite: every difference](#postgresql--sqlite-every-difference)
-7. [The packages, and why each one](#the-packages-and-why-each-one)
-8. [Design decisions worth understanding](#design-decisions-worth-understanding)
-9. [Testing](#testing)
-10. [Where this deviates from the books](#where-this-deviates-from-the-books)
-11. [Going further from here](#going-further-from-here)
+2. [Running tasks](#running-tasks)
+3. [Trying it in Bruno](#trying-it-in-bruno)
+4. [API endpoints](#api-endpoints)
+5. [Project layout](#project-layout)
+6. [How a request flows through the app](#how-a-request-flows-through-the-app)
+7. [PostgreSQL → SQLite: every difference](#postgresql--sqlite-every-difference)
+8. [The packages, and why each one](#the-packages-and-why-each-one)
+9. [Design decisions worth understanding](#design-decisions-worth-understanding)
+10. [Testing](#testing)
+11. [Where this deviates from the books](#where-this-deviates-from-the-books)
+12. [Going further from here](#going-further-from-here)
 
 ---
 
@@ -38,13 +39,18 @@ compiler.
 ```bash
 # 1. Seed a demo user (activated, with full permissions) and sample movies.
 #    This creates and migrates greenlight.db on the spot.
-make run/seed
+mise run run/seed
 
 # 2. Start the API.
-make run/api
+mise run run/api
 ```
 
-`make run/seed` prints an authentication token — it's fixed (`GREENLIGHT0000000000000000` by default, override with `-token`), so it's the same every time rather than something you copy out of the output each run. In another terminal:
+Tasks are run with [mise](https://mise.jdx.dev/) — see [Running
+tasks](#running-tasks) below if you don't have it, or just read the command out
+of `mise.toml` and run the `go` line directly. Nothing in the project *requires*
+mise; it only pins the Go version and saves some typing.
+
+`mise run run/seed` prints an authentication token — it's fixed (`GREENLIGHT0000000000000000` by default, override with `-token`), so it's the same every time rather than something you copy out of the output each run. In another terminal:
 
 ```bash
 export TOKEN=GREENLIGHT0000000000000000
@@ -82,7 +88,75 @@ curl -X POST localhost:4000/v1/tokens/authentication \
   -d '{"email":"alice@example.com","password":"pa55word1234"}'
 ```
 
-Run `make help` to see every available target.
+---
+
+## Running tasks
+
+Project tasks live in `mise.toml` and are run with
+[mise](https://mise.jdx.dev/) — a single tool that both pins the Go version
+(`[tools]`) and replaces what used to be a Makefile (`[tasks.*]`).
+
+```bash
+# Install mise (see https://mise.jdx.dev/getting-started.html for other methods)
+curl https://mise.run | sh
+
+# Trust this project's config — mise refuses to run tasks from an
+# untrusted config file, since a config can set env vars and run commands.
+mise trust
+
+mise tasks              # list every task, with descriptions
+mise run test           # run one
+mise run                # interactive picker
+```
+
+Task names are unchanged from the old Makefile, so `make test/cover` is now
+`mise run test/cover`. The full list:
+
+```bash
+mise run run/api        # run the API server (auto-migrates on startup)
+mise run run/seed       # seed a demo user + movies, print an auth token
+
+mise run test           # everything, with the race detector
+mise run test/short     # only the fast unit tests
+mise run test/cover     # open an HTML coverage report
+mise run test/fuzz      # 30s of fuzzing per target
+mise run test/bench     # benchmarks, with allocation counts
+mise run audit          # tidy + fmt + vet + test -race
+mise run tidy           # tidy and verify module dependencies
+
+mise run db/shell             # sqlite3 shell against the database
+mise run db/reset             # delete the db file (prompts first)
+mise run db/migrations/new add_foo   # create a migration pair
+mise run db/migrations/up            # apply migrations manually
+mise run db/migrations/down          # roll everything back (prompts first)
+mise run db/migrations/version       # print the current version
+
+mise run build/api      # build ./bin/api and ./bin/seed
+mise run build/linux    # cross-compile linux/amd64, CGO_ENABLED=0
+```
+
+Three things worth knowing:
+
+- **Variables are environment variables**, where the Makefile used `make x
+  y=z`. Each has a default in `[vars]`:
+
+  ```bash
+  db_dsn=/tmp/other.db mise run run/api
+  fuzztime=10s mise run test/fuzz
+  ```
+
+- **Arguments are positional and validated.** `db/migrations/new` takes the
+  migration name as a real argument, so `mise run db/migrations/new` with no
+  name fails with `Missing required arg: <name>` rather than creating a
+  migration called nothing.
+
+- **Destructive tasks prompt.** `db/reset` and `db/migrations/down` use mise's
+  `confirm`, which requires a real terminal — piping `y` into it won't work.
+  In a script, use `mise run --yes db/reset`.
+
+There's no `help` task: `mise tasks` already prints every task with its
+description, which is what the Makefile's hand-rolled `sed`/`column` help
+target existed to do.
 
 ---
 
@@ -97,17 +171,17 @@ desktop app, then select the `Local` environment — it holds `baseUrl` and
 **Fast path**, using the seeded demo user (already has both `movies:read` and
 `movies:write`):
 
-1. `make run/seed` — the demo user's token is fixed
+1. `mise run run/seed` — the demo user's token is fixed
    (`GREENLIGHT0000000000000000`), so `Local`'s `token` already matches it.
    No copying required, even across reseeds.
-2. `make run/api`
+2. `mise run run/api`
 3. Send any request in the collection.
 
 **Real signup flow**, exercising registration/activation/login instead of the
 seeded user:
 
 1. Send **Users → Register User** (202). The activation email is logged to
-   the `make run/api` terminal instead of sent — copy the token from there.
+   the `mise run run/api` terminal instead of sent — copy the token from there.
 2. Paste it into **Users → Activate User**'s body and send (200).
 3. Send **Tokens → Authenticate** with the same credentials (201), and copy
    `authentication_token.token` from the response into `Local`'s `token`.
@@ -183,7 +257,7 @@ key:
 │   └── testutil/         Builds a fresh migrated database per test
 │
 ├── migrations/           Versioned .sql schema, embedded into the binary
-├── Makefile
+├── mise.toml             Go version pin + every project task
 └── README.md
 ```
 
@@ -453,7 +527,7 @@ battle-tested, but it needs a C toolchain, breaks `CGO_ENABLED=0` static builds,
 and makes cross-compiling painful.
 
 `modernc.org/sqlite` is SQLite **transpiled to Go**. Pure Go means no C
-compiler, trivial cross-compilation (`make build/linux` is one command with no
+compiler, trivial cross-compilation (`mise run build/linux` is one command with no
 setup), and `go test` that just works on any machine. For a learning project
 that's a decisive advantage, and it's plenty fast.
 
@@ -623,12 +697,12 @@ responses, so an attacker can't enumerate which addresses have accounts.
 ## Testing
 
 ```bash
-make test          # everything, with the race detector
-make test/short    # only the fast unit tests
-make test/cover    # open an HTML coverage report
-make test/fuzz     # 30s of fuzzing per package
-make test/bench    # benchmarks, with allocation counts
-make audit         # fmt + vet + tidy + test -race
+mise run test          # everything, with the race detector
+mise run test/short    # only the fast unit tests
+mise run test/cover    # open an HTML coverage report
+mise run test/fuzz     # 30s of fuzzing per package
+mise run test/bench    # benchmarks, with allocation counts
+mise run audit         # fmt + vet + tidy + test -race
 ```
 
 Current coverage: **`internal/validator` 100%, `internal/mailer` 93%,
@@ -636,7 +710,7 @@ Current coverage: **`internal/validator` 100%, `internal/mailer` 93%,
 **84% across the module**. Most of what's left is `main`/`run`, which is process
 wiring.
 
-> **A note on measuring it.** `make test/cover` passes `-coverpkg=./...`. Without
+> **A note on measuring it.** `mise run test/cover` passes `-coverpkg=./...`. Without
 > it, `go test -cover` only instruments the package whose tests are running, so
 > `internal/db` reported **0%** despite being exercised by nearly every test in
 > the repo through `internal/testutil`. If a package looks suspiciously
@@ -727,7 +801,7 @@ contain a line break", which is what prevents SMTP header injection. Any crasher
 found gets written to `testdata/fuzz/` and becomes a permanent regression test.
 
 **Benchmarks.** Not for optimisation — as a tripwire and as documentation. Run
-`make test/bench` and the "~250ms by design" claim about bcrypt below stops
+`mise run test/bench` and the "~250ms by design" claim about bcrypt below stops
 being a claim. They also show the `LIMIT/OFFSET` pagination cost climbing on
 deep pages, and what `json.MarshalIndent` costs on every response.
 
@@ -770,7 +844,7 @@ Deliberate changes, all of them explained in comments at the site:
    > version.` behind, needing a manual `migrate force` to recover.
    >
    > In practice this only bites if you start two servers against one file
-   > simultaneously (`make run/api` twice, or a restart overlapping a boot).
+   > simultaneously (`mise run run/api` twice, or a restart overlapping a boot).
    > Sequential restarts are fine and are covered by
    > `TestMigrateUpAcrossRestarts`. It's a property of golang-migrate's SQLite
    > driver rather than of this code, so it's documented here rather than

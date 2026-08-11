@@ -26,7 +26,7 @@ import (
 //     TestMovieModel_UpdateEditConflict simulates a conflict by holding a stale
 //     copy; these tests produce a real one from two goroutines racing.
 //
-// Run under `go test -race`, which `make test` does.
+// Run under `go test -race`, which `mise run test` does.
 //
 // ── THE CONCURRENCY PATTERN USED BELOW ───────────────────────────────────────
 //

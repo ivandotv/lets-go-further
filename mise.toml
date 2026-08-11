@@ -1,2 +1,203 @@
+# ==================================================================================== #
+# Tool versions and project tasks.
+#
+# This replaces the Makefile from chapter 19 of "Let's Go Further". A note on
+# syntax, since mise tasks have their own conventions:
+#
+#   [tasks."name"]   task names are quoted because they contain a `/`. Run them
+#                    with `mise run <name>`, e.g. `mise run run/api`.
+#
+#   depends = [...]  tasks that must complete first.
+#
+#   run = [...]      a list runs the commands in series; a single string runs one
+#                    command; a '''...''' block is a shell script.
+#
+#   confirm = "..."  prompts before running — replaces the Makefile's `confirm`
+#                    target that destructive targets depended on.
+#
+#   {{ vars.x }}     a variable from the [vars] table below. Each one falls back
+#                    to an environment variable, so they can be overridden per
+#                    run: `db_dsn=/tmp/other.db mise run run/api`.
+#
+# `mise tasks` lists everything with descriptions — no hand-written help target
+# is needed, which is why the Makefile's `help` target has no equivalent here.
+# ==================================================================================== #
+
 [tools]
 go = "latest"
+
+[vars]
+# The database file. Override with: db_dsn=/tmp/other.db mise run run/api
+db_dsn = "{{ env.db_dsn | default(value='greenlight.db') }}"
+
+# Where the migration .sql files live.
+migrations_path = "{{ env.migrations_path | default(value='./migrations') }}"
+
+# How long each fuzz target runs. Override with: fuzztime=10s mise run test/fuzz
+fuzztime = "{{ env.fuzztime | default(value='30s') }}"
+
+# Linker flags:
+#   -s  strip the symbol table
+#   -w  strip DWARF debug information
+#
+# Together these cut roughly 25% off the binary size. We do NOT need the book's
+# `-X main.version=...` trick, because Go embeds the VCS revision automatically
+# since 1.18 — see vcsRevision() in cmd/api/main.go.
+linker_flags = "-s -w"
+
+# ==================================================================================== #
+# DEVELOPMENT
+# ==================================================================================== #
+
+[tasks."run/api"]
+description = "run the API server"
+# Migrations run automatically on startup, so this works against an empty
+# directory with no setup at all.
+run = "go run ./cmd/api -db-dsn={{ vars.db_dsn }}"
+
+[tasks."run/seed"]
+description = "create a demo user with sample data and print an auth token"
+run = "go run ./cmd/seed -db-dsn={{ vars.db_dsn }}"
+
+[tasks."db/shell"]
+description = "open a sqlite3 shell against the database"
+run = "sqlite3 {{ vars.db_dsn }}"
+
+[tasks."db/migrations/new"]
+description = "create a new pair of migration files"
+# Requires the golang-migrate CLI:
+#   go install -tags 'sqlite' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+#
+# Note you only need the CLI to CREATE migrations. Applying them needs nothing
+# extra, because the .sql files are embedded in the binary and applied on
+# startup (see internal/db.MigrateUp).
+#
+# Unlike the Makefile's `name=...` variable, the name is a required positional
+# argument — `mise run db/migrations/new add_foo`. mise refuses to run the task
+# at all if it's missing, instead of creating a migration with an empty name.
+usage = 'arg "<name>" help="name of the migration, e.g. add_foo"'
+run = [
+    "echo 'Creating migration files for {{ usage.name }}...'",
+    "migrate create -seq -ext=.sql -dir={{ vars.migrations_path }} {{ usage.name }}",
+]
+
+[tasks."db/migrations/up"]
+description = "apply all up migrations manually"
+# Normally unnecessary — the API applies them itself on startup. This task is
+# here for when you want to migrate without running the server.
+run = [
+    "echo 'Running up migrations...'",
+    'migrate -path={{ vars.migrations_path }} -database="sqlite://{{ vars.db_dsn }}" up',
+]
+
+[tasks."db/migrations/down"]
+description = "roll back all migrations"
+confirm = "Are you sure? This rolls back every migration."
+run = 'migrate -path={{ vars.migrations_path }} -database="sqlite://{{ vars.db_dsn }}" down'
+
+[tasks."db/migrations/version"]
+description = "print the current migration version"
+run = 'migrate -path={{ vars.migrations_path }} -database="sqlite://{{ vars.db_dsn }}" version'
+
+[tasks."db/reset"]
+description = "delete the database file and start over"
+confirm = "Are you sure? This deletes the database file."
+run = [
+    "rm -f {{ vars.db_dsn }} {{ vars.db_dsn }}-wal {{ vars.db_dsn }}-shm",
+    "echo 'Database removed. It will be recreated and migrated on next run.'",
+]
+
+# ==================================================================================== #
+# QUALITY CONTROL
+# ==================================================================================== #
+
+[tasks.audit]
+description = "format, vet, and test everything"
+depends = ["tidy"]
+run = [
+    "echo 'Formatting code...'",
+    "go fmt ./...",
+    "echo 'Vetting code...'",
+    "go vet ./...",
+    "echo 'Running tests...'",
+    "go test -race -vet=off ./...",
+]
+
+[tasks.tidy]
+description = "tidy and verify module dependencies"
+run = [
+    "echo 'Tidying module dependencies...'",
+    "go mod tidy",
+    "echo 'Verifying module dependencies...'",
+    "go mod verify",
+]
+
+[tasks.test]
+description = "run all tests"
+run = "go test -race ./..."
+
+[tasks."test/short"]
+description = "run only the fast unit tests, skipping database-backed ones"
+run = "go test -short ./..."
+
+[tasks."test/cover"]
+description = "run tests and open the HTML coverage report"
+# -coverpkg=./... measures coverage of EVERY package, not just the one whose
+# tests are running. Without it, internal/db reports 0% — it has its own tests
+# now, but most of its lines are exercised through internal/testutil from other
+# packages, and the default per-package instrumentation doesn't credit that.
+run = [
+    "go test -coverpkg=./... -coverprofile=/tmp/coverage.out ./...",
+    "go tool cover -html=/tmp/coverage.out",
+]
+
+[tasks."test/fuzz"]
+description = "run each fuzz target in turn (override with fuzztime=10s)"
+# Not part of `audit`: fuzzing is open-ended, so it's something you run
+# deliberately rather than on every commit. A crasher gets written to the
+# package's testdata/fuzz/ directory and becomes a permanent seed for the normal
+# `go test` run — so a failure here turns itself into a regression test, and you
+# commit the file.
+#
+# Two constraints shape this task:
+#   - -fuzz takes one PACKAGE at a time, and
+#   - the regexp must match exactly ONE target, or the toolchain refuses with
+#     "-fuzz matches more than one fuzz test". internal/data has two, so every
+#     target is named individually rather than matched with a bare `Fuzz`.
+#
+# -run=^$ matches no ordinary test, so each line does nothing but fuzz. (In the
+# Makefile this had to be written `^$$` to escape it from make; mise needs no
+# such escaping.)
+run = [
+    "go test -run=^$ -fuzz=FuzzRuntimeUnmarshalJSON -fuzztime={{ vars.fuzztime }} ./internal/data/",
+    "go test -run=^$ -fuzz=FuzzGenresScan -fuzztime={{ vars.fuzztime }} ./internal/data/",
+    "go test -run=^$ -fuzz=FuzzEmailRX -fuzztime={{ vars.fuzztime }} ./internal/validator/",
+    "go test -run=^$ -fuzz=FuzzReadJSON -fuzztime={{ vars.fuzztime }} ./cmd/api/",
+]
+
+[tasks."test/bench"]
+description = "run all benchmarks with allocation counts"
+run = "go test -bench=. -benchmem -run=^$ ./..."
+
+# ==================================================================================== #
+# BUILD
+# ==================================================================================== #
+
+[tasks."build/api"]
+description = "build the API server for the current platform"
+run = [
+    "echo 'Building cmd/api...'",
+    "go build -ldflags='{{ vars.linker_flags }}' -o=./bin/api ./cmd/api",
+    "go build -ldflags='{{ vars.linker_flags }}' -o=./bin/seed ./cmd/seed",
+]
+
+[tasks."build/linux"]
+description = "cross-compile the API server for linux/amd64"
+# This is where the pure-Go SQLite driver earns its keep: with the cgo-based
+# mattn/go-sqlite3 you'd need a linux C cross-toolchain. Here it's one command
+# with no extra setup.
+env = { GOOS = "linux", GOARCH = "amd64", CGO_ENABLED = "0" }
+run = [
+    "echo 'Building for linux/amd64...'",
+    "go build -ldflags='{{ vars.linker_flags }}' -o=./bin/linux_amd64/api ./cmd/api",
+]

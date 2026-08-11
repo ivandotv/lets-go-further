@@ -16,7 +16,7 @@
 //  3. The schema can never drift out of sync with the binary that's running.
 //
 // The golang-migrate CLI still works against this directory if you prefer to
-// drive migrations manually — see the `make db/migrations/*` targets.
+// drive migrations manually — see the `mise run db/migrations/*` tasks.
 package migrations
 
 import "embed"

@@ -267,12 +267,12 @@ testing machinery involved — lives in
 `go doc greenlight/internal/testutil`.
 
 ```
-make test        go test -race ./...        the everyday command
-make test/short  skips database-backed tests
-make test/cover  coverage (-coverpkg=./...), opens an HTML report
-make test/fuzz   30s of fuzzing per package
-make test/bench  benchmarks with allocation counts
-make audit       tidy + fmt + vet + test -race
+mise run test        go test -race ./...        the everyday command
+mise run test/short  skips database-backed tests
+mise run test/cover  coverage (-coverpkg=./...), opens an HTML report
+mise run test/fuzz   30s of fuzzing per package
+mise run test/bench  benchmarks with allocation counts
+mise run audit       tidy + fmt + vet + test -race
 ```
 
 **Layers of the suite, roughly outside-in:**

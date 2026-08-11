@@ -137,7 +137,7 @@ func TestGenres_JSONRepresentation(t *testing.T) {
 // else in this package can assume a Genres value is well-formed, because the
 // only way to build one is through code. Scan is the exception: it runs on
 // whatever happens to be in the column, including rows written by an older
-// version of this code, by a migration, or by hand in `make db/shell`.
+// version of this code, by a migration, or by hand in `mise run db/shell`.
 //
 // Properties checked:
 //

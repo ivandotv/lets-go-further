@@ -22,33 +22,50 @@ non-trivial changes, don't re-derive what they already explain:
 
 ## Commands
 
-```bash
-make run/seed          # create+migrate greenlight.db, seed demo user/movies, print an auth token
-make run/api            # run the API server (auto-migrates on startup)
+Tasks live in `mise.toml` and run via [mise](https://mise.jdx.dev/) — there is
+no Makefile. Task names are unchanged from the Makefile that preceded it, so
+every command is `mise run <name>`.
 
-make test               # go test -race ./...
-make test/short         # skip database-backed tests (go test -short)
-make test/cover         # coverage (-coverpkg=./...), opens HTML report
-make test/fuzz          # 30s per package across the 4 fuzz targets
-make test/bench         # benchmarks with allocation counts
-make audit               # tidy + fmt + vet + test -race  (run before finishing any change)
+```bash
+mise run run/seed       # create+migrate greenlight.db, seed demo user/movies, print an auth token
+mise run run/api        # run the API server (auto-migrates on startup)
+
+mise run test           # go test -race ./...
+mise run test/short     # skip database-backed tests (go test -short)
+mise run test/cover     # coverage (-coverpkg=./...), opens HTML report
+mise run test/fuzz      # 30s per target across the 4 fuzz targets
+mise run test/bench     # benchmarks with allocation counts
+mise run audit          # tidy + fmt + vet + test -race  (run before finishing any change)
 
 # Single test:
 go test ./internal/data/ -run TestMovieModel_Insert -v
 go test ./cmd/api/ -run TestAuthenticationAndPermissions -v
 
-make db/shell            # sqlite3 shell against greenlight.db
-make db/reset             # confirm; delete the db file, recreated fresh next run
-make db/migrations/new name=add_foo   # requires the golang-migrate CLI (only for authoring; applying needs nothing extra)
+mise run db/shell            # sqlite3 shell against greenlight.db
+mise run db/reset            # prompts; delete the db file, recreated fresh next run
+mise run db/migrations/new add_foo   # requires the golang-migrate CLI (only for authoring; applying needs nothing extra)
 
-make build/api            # build ./bin/api and ./bin/seed for current platform
-make build/linux           # cross-compile linux/amd64, CGO_ENABLED=0
+mise run build/api      # build ./bin/api and ./bin/seed for current platform
+mise run build/linux    # cross-compile linux/amd64, CGO_ENABLED=0
 
-make help                  # list every target
+mise tasks              # list every task with its description
 ```
 
 Go 1.26+ is the only requirement — no Docker, no database server, no C
-toolchain.
+toolchain. (mise also pins the Go version via `[tools]`, but nothing in the
+project *requires* mise — every task is a plain `go` command you can read out
+of `mise.toml` and run directly.)
+
+Four differences from the old Makefile, worth remembering when editing tasks:
+
+- **Variables are env vars, not `make x y=z`**: `db_dsn=/tmp/other.db mise run
+  run/api`, `fuzztime=10s mise run test/fuzz`. Defaults live in `[vars]`, each
+  written as `{{ env.x | default(value='...') }}`.
+- **`db/migrations/new` takes a positional arg**, not `name=`. mise refuses to
+  run it without one.
+- **`db/reset` and `db/migrations/down` use `confirm`**, which needs a real
+  TTY — piping `y` in won't work. Non-interactive: `mise run --yes db/reset`.
+- **`mise trust` is required once** per clone before tasks will run.
 
 ## Architecture, in brief
 
@@ -103,7 +120,7 @@ greenlight/internal/testutil`) before adding tests; don't re-derive it here.
 - Coverage baseline: `internal/validator` 100%, `internal/mailer` 93%,
   `internal/data` 91%, `internal/db` 84%, `cmd/api` 81%, `cmd/seed` 73%; **84%
   module-wide**. The rest is mostly `main`/`run` process wiring. Note
-  `make test/cover` uses `-coverpkg=./...` — without it `internal/db` reads 0%,
+  `mise run test/cover` uses `-coverpkg=./...` — without it `internal/db` reads 0%,
   because it's exercised through `internal/testutil` from other packages.
 - Beyond example-based tests there are **4 fuzz targets** (`Runtime.UnmarshalJSON`,
   `Genres.Scan`, `readJSON`, `EmailRX`), **concurrency tests** in
@@ -137,6 +154,6 @@ greenlight/internal/testutil`) before adding tests; don't re-derive it here.
   *handler* sets and panics on anything else (`Filters.sortColumn()`). Never
   build a sort column from unvalidated input.
 - New migrations need matching `.up.sql`/`.down.sql` files created with the
-  `golang-migrate` CLI (`make db/migrations/new name=...`); they're embedded
+  `golang-migrate` CLI (`mise run db/migrations/new add_foo`); they're embedded
   into the binary and applied automatically at boot, so no manual migration
-  step is needed to pick them up in tests or `make run/api`.
+  step is needed to pick them up in tests or `mise run run/api`.
