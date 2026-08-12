@@ -126,6 +126,8 @@ func (app *application) requirePermission(code string, next http.HandlerFunc) ht
 		}
 
 		next.ServeHTTP(w, r)
+		//note: can also be
+		// next(w, r)
 	}
 
 	return app.requireActivatedUser(fn)
