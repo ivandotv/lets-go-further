@@ -326,14 +326,12 @@ func (m logMailer) Send(recipient, templateFile string, data any) error {
 //  2. Graceful shutdown would kill the goroutine mid-send. The WaitGroup lets
 //     serve() wait for outstanding work before exiting.
 //
-// Add(1) must happen HERE, in the calling goroutine, not inside the new one —
-// otherwise Wait() could run before Add() and return too early.
+// wg.Go adds the task to the WaitGroup before starting the goroutine —
+// otherwise Wait() could run before the task is registered and return too
+// early.
 func (app *application) background(fn func()) {
-	app.wg.Add(1)
-
-	go func() {
+	app.wg.Go(func() {
 		// Runs when the goroutine finishes, whether normally or via panic.
-		defer app.wg.Done()
 
 		defer func() {
 			if r := recover(); r != nil {
@@ -344,7 +342,7 @@ func (app *application) background(fn func()) {
 		}()
 
 		fn()
-	}()
+	})
 }
 
 // vcsRevision reads the version control revision that Go embeds into the
