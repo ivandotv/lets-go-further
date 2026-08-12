@@ -239,7 +239,8 @@ key:
 │   │   ├── main.go       Config, flags, dependency wiring, expvar setup
 │   │   ├── server.go     HTTP server + graceful shutdown
 │   │   ├── routes.go     Router and the middleware chain
-│   │   ├── middleware.go 8 middlewares: panic recovery, rate limiting, auth…
+│   │   ├── auth.go / cors.go / logging.go / panic_recovery.go /
+│   │   │   rate_limit.go / security_headers.go   One middleware per file
 │   │   ├── context.go    Type-safe storage of the current user in the context
 │   │   ├── helpers.go    JSON read/write, query-string parsing
 │   │   ├── errors.go     Every error response the API can produce

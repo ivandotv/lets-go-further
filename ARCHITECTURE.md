@@ -62,7 +62,9 @@ layer.
 cmd/api/       The HTTP server — everything transport-specific.
   main.go        wires everything together: config, logger, db, models, mailer
   routes.go      the URL → handler table, and the middleware chain
-  middleware.go  8 middlewares (auth, rate limiting, CORS, panic recovery...)
+  auth.go, cors.go, logging.go,          one file per middleware concern
+  panic_recovery.go, rate_limit.go,
+  security_headers.go
   *.go           one file per resource: healthcheck, movies, users, tokens
   helpers.go     shared JSON read/write helpers
   errors.go      every error response shape
