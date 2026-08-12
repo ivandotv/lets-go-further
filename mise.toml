@@ -133,7 +133,7 @@ run = [
 ]
 
 [tasks.test]
-description = "run all tests"
+description = "run all Test* functions (see test/fuzz and test/bench for the rest)"
 run = "go test -race ./..."
 
 [tasks."test/short"]
