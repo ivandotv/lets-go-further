@@ -80,9 +80,7 @@ func TestMovieModel_DeleteNonExistentID(t *testing.T) {
 
 	err := models.Movies.Delete(99999)
 
-	if !errors.Is(err, ErrRecordNotFound) {
-		t.Errorf("got error %v; want ErrRecordNotFound", err)
-	}
+	assert.ErrorIs(t, err, ErrRecordNotFound)
 }
 
 // TestPermissionModel_GetAllForUserWithNone covers the empty-result path.

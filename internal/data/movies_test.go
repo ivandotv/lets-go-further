@@ -1,7 +1,6 @@
 package data
 
 import (
-	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -97,9 +96,7 @@ func TestMovieModel_GetNotFound(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := models.Movies.Get(tt.id)
 
-			if !errors.Is(err, ErrRecordNotFound) {
-				t.Errorf("got error %v; want ErrRecordNotFound", err)
-			}
+			assert.ErrorIs(t, err, ErrRecordNotFound)
 		})
 	}
 }
@@ -157,9 +154,7 @@ func TestMovieModel_UpdateEditConflict(t *testing.T) {
 	clientB.Title = "Deadpool (B's edit)"
 	err = models.Movies.Update(clientB)
 
-	if !errors.Is(err, ErrEditConflict) {
-		t.Fatalf("got error %v; want ErrEditConflict", err)
-	}
+	assert.ErrorIs(t, err, ErrEditConflict)
 
 	// And A's write must have survived intact.
 	got, err := models.Movies.Get(movie.ID)
@@ -177,17 +172,13 @@ func TestMovieModel_Delete(t *testing.T) {
 
 	// It should be gone.
 	_, err := models.Movies.Get(movie.ID)
-	if !errors.Is(err, ErrRecordNotFound) {
-		t.Errorf("got error %v; want ErrRecordNotFound after delete", err)
-	}
+	assert.ErrorIs(t, err, ErrRecordNotFound)
 
 	// Deleting again must report not-found rather than succeeding silently.
 	// SQL happily deletes zero rows, so this behaviour only exists because
 	// Delete checks RowsAffected.
 	err = models.Movies.Delete(movie.ID)
-	if !errors.Is(err, ErrRecordNotFound) {
-		t.Errorf("got error %v; want ErrRecordNotFound on second delete", err)
-	}
+	assert.ErrorIs(t, err, ErrRecordNotFound)
 }
 
 // seedMovies inserts a fixed set of records for the GetAll tests.

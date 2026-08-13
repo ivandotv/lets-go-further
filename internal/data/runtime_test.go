@@ -74,11 +74,7 @@ func TestRuntime_UnmarshalJSON(t *testing.T) {
 			err := runtime.UnmarshalJSON([]byte(tt.input))
 
 			if tt.wantError != nil {
-				// errors.Is rather than == so the test still passes if the
-				// error gets wrapped later.
-				if !errors.Is(err, tt.wantError) {
-					t.Fatalf("got error %v; want %v", err, tt.wantError)
-				}
+				assert.ErrorIs(t, err, tt.wantError)
 				return
 			}
 

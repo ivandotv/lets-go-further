@@ -1,7 +1,6 @@
 package data
 
 import (
-	"errors"
 	"testing"
 	"time"
 
@@ -110,9 +109,7 @@ func TestUserModel_EmailIsCaseInsensitive(t *testing.T) {
 	assert.NilError(t, dupe.Password.Set("pa55word1234"))
 
 	err := models.Users.Insert(dupe)
-	if !errors.Is(err, ErrDuplicateEmail) {
-		t.Errorf("got error %v; want ErrDuplicateEmail", err)
-	}
+	assert.ErrorIs(t, err, ErrDuplicateEmail)
 }
 
 func TestUserModel_InsertDuplicateEmail(t *testing.T) {
@@ -126,18 +123,14 @@ func TestUserModel_InsertDuplicateEmail(t *testing.T) {
 	// This is the test that pins down isUniqueConstraintErr — if the SQLite
 	// error code detection breaks, this returns a raw driver error instead.
 	err := models.Users.Insert(dupe)
-	if !errors.Is(err, ErrDuplicateEmail) {
-		t.Errorf("got error %v; want ErrDuplicateEmail", err)
-	}
+	assert.ErrorIs(t, err, ErrDuplicateEmail)
 }
 
 func TestUserModel_GetByEmailNotFound(t *testing.T) {
 	models := newTestModels(t)
 
 	_, err := models.Users.GetByEmail("nobody@example.com")
-	if !errors.Is(err, ErrRecordNotFound) {
-		t.Errorf("got error %v; want ErrRecordNotFound", err)
-	}
+	assert.ErrorIs(t, err, ErrRecordNotFound)
 }
 
 func TestUserModel_Update(t *testing.T) {
@@ -171,9 +164,7 @@ func TestUserModel_UpdateEditConflict(t *testing.T) {
 	// The stale copy is still on version 1, so its update must be rejected.
 	stale.Name = "Alice Two"
 	err = models.Users.Update(stale)
-	if !errors.Is(err, ErrEditConflict) {
-		t.Errorf("got error %v; want ErrEditConflict", err)
-	}
+	assert.ErrorIs(t, err, ErrEditConflict)
 }
 
 func TestUserModel_UpdateDuplicateEmail(t *testing.T) {
@@ -186,9 +177,7 @@ func TestUserModel_UpdateDuplicateEmail(t *testing.T) {
 	bob.Email = "alice@example.com"
 
 	err := models.Users.Update(bob)
-	if !errors.Is(err, ErrDuplicateEmail) {
-		t.Errorf("got error %v; want ErrDuplicateEmail", err)
-	}
+	assert.ErrorIs(t, err, ErrDuplicateEmail)
 }
 
 // TestUserModel_GetForToken exercises the authentication lookup, including the
@@ -214,16 +203,12 @@ func TestUserModel_GetForToken(t *testing.T) {
 		// versa. This is what stops a token emailed in the clear from being
 		// replayed for full API access.
 		_, err := models.Users.GetForToken(ScopeActivation, authToken.Plaintext)
-		if !errors.Is(err, ErrRecordNotFound) {
-			t.Errorf("got error %v; want ErrRecordNotFound", err)
-		}
+		assert.ErrorIs(t, err, ErrRecordNotFound)
 	})
 
 	t.Run("unknown token is rejected", func(t *testing.T) {
 		_, err := models.Users.GetForToken(ScopeAuthentication, "AAAAAAAAAAAAAAAAAAAAAAAAAA")
-		if !errors.Is(err, ErrRecordNotFound) {
-			t.Errorf("got error %v; want ErrRecordNotFound", err)
-		}
+		assert.ErrorIs(t, err, ErrRecordNotFound)
 	})
 
 	t.Run("expired token is rejected", func(t *testing.T) {
@@ -235,9 +220,7 @@ func TestUserModel_GetForToken(t *testing.T) {
 		assert.NilError(t, err)
 
 		_, err = models.Users.GetForToken(ScopeAuthentication, expired.Plaintext)
-		if !errors.Is(err, ErrRecordNotFound) {
-			t.Errorf("got error %v; want ErrRecordNotFound for an expired token", err)
-		}
+		assert.ErrorIs(t, err, ErrRecordNotFound)
 	})
 }
 

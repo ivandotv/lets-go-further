@@ -13,6 +13,7 @@
 package assert
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -82,5 +83,32 @@ func NilError(t *testing.T, err error) {
 
 	if err != nil {
 		t.Fatalf("got unexpected error: %v", err)
+	}
+}
+
+// ErrorIs fails the test if err doesn't match target in the errors.Is sense.
+//
+// This is the mirror of NilError, for the many tests that assert the model
+// layer returned a specific sentinel — ErrRecordNotFound, ErrEditConflict,
+// ErrDuplicateEmail, ErrInvalidRuntimeFormat. Those assertions are the point of
+// the test, not setup for it, so this reports with t.Error and lets the test
+// carry on, the same as Equal above. NilError is the odd one out in using
+// Fatal, and for a reason documented there.
+//
+// errors.Is rather than == because it walks the chain of wrapped errors, so the
+// assertion keeps working the moment anyone writes fmt.Errorf("...: %w", Err).
+// A bare == would break silently at that point. (%w is what does the wrapping —
+// %v flattens the error to a string and defeats Is entirely.)
+//
+// There's no message parameter, deliberately: t.Helper() means the failure is
+// reported against the CALLER's line, which is what distinguishes two identical
+// assertions in the same test. Where a failure needs context the line number
+// can't supply — which iteration of a loop, which fuzz input — write the
+// errors.Is check out by hand and say so in the message.
+func ErrorIs(t *testing.T, err, target error) {
+	t.Helper()
+
+	if !errors.Is(err, target) {
+		t.Errorf("got error: %v; want: %v", err, target)
 	}
 }
