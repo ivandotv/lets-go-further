@@ -24,7 +24,27 @@
 # ==================================================================================== #
 
 [tools]
-go = "latest"
+go = "1.26.5"
+
+# Dev-only CLIs used by the QUALITY CONTROL tasks below (lint, vuln,
+# test/summary, test/bench/compare). mise installs these automatically —
+# unlike `go`, nothing in the module itself needs them, so they stay out of
+# go.mod. golang-migrate is deliberately NOT here: see the comment on
+# db/migrations/new for why.
+#
+# Pinned rather than "latest": these run in `lint`/`vuln`/`test/summary`,
+# and an unpinned tool can start failing a clean tree when upstream ships a
+# new default-enabled linter or check — with no code change on our side to
+# explain it. Bump deliberately by editing the version here.
+golangci-lint = "2.12.2"
+gotestsum = "1.13.0"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.6.0"
+
+# Also pinned, for an extra reason: x/perf has no tagged releases, so
+# "latest" would mean "whatever commit is newest right now" via a
+# pseudo-version — and it also trips mise's minimum_release_age check on
+# every run, since a freshly-computed pseudo-version always looks brand new.
+"go:golang.org/x/perf/cmd/benchstat" = "0.0.0-20260813145340-fd4a688df892"
 
 [vars]
 # The database file. Override with: db_dsn=/tmp/other.db mise run run/api
@@ -132,9 +152,25 @@ run = [
     "go mod verify",
 ]
 
+[tasks.lint]
+description = "run golangci-lint (aggregates vet, staticcheck, errcheck, and more)"
+# CLI comes from [tools] above (mise installs it). Not part of `audit` —
+# `audit` is deliberately dependency-free (plain `go` commands only).
+run = "golangci-lint run ./..."
+
+[tasks.vuln]
+description = "scan module dependencies against the Go vulnerability database"
+# CLI comes from [tools] above (mise installs it).
+run = "govulncheck ./..."
+
 [tasks.test]
 description = "run all Test* functions (see test/fuzz and test/bench for the rest)"
 run = "go test -race ./..."
+
+[tasks."test/summary"]
+description = "run tests through gotestsum for a readable pass/fail summary"
+# CLI comes from [tools] above (mise installs it).
+run = "gotestsum --format testname -- -race ./..."
 
 [tasks."test/short"]
 description = "run only the fast unit tests, skipping database-backed ones"
@@ -178,6 +214,21 @@ run = [
 [tasks."test/bench"]
 description = "run all benchmarks with allocation counts"
 run = "go test -bench=. -benchmem -run=^$ ./..."
+
+[tasks."test/bench/compare"]
+description = "compare two benchmark runs for statistically significant deltas"
+# CLI comes from [tools] above (mise installs it).
+#
+# Typical workflow: capture a baseline, make your change, capture again:
+#   mise run test/bench > /tmp/bench-old.txt
+#   ...make your change...
+#   mise run test/bench > /tmp/bench-new.txt
+#   mise run test/bench/compare /tmp/bench-old.txt /tmp/bench-new.txt
+usage = '''
+arg "<old>" help="path to the baseline benchmark output"
+arg "<new>" help="path to the new benchmark output"
+'''
+run = "benchstat {{ usage.old }} {{ usage.new }}"
 
 # ==================================================================================== #
 # BUILD

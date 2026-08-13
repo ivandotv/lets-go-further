@@ -121,8 +121,12 @@ mise run test/short     # only the fast unit tests
 mise run test/cover     # open an HTML coverage report
 mise run test/fuzz      # 30s of fuzzing per target
 mise run test/bench     # benchmarks, with allocation counts
+mise run test/bench/compare old.txt new.txt   # benchstat diff between two runs
+mise run test/summary   # tests via gotestsum, readable pass/fail output
 mise run audit          # tidy + fmt + vet + test -race
 mise run tidy           # tidy and verify module dependencies
+mise run lint           # golangci-lint (vet, staticcheck, errcheck, ...)
+mise run vuln           # govulncheck against the Go vulnerability database
 
 mise run db/shell             # sqlite3 shell against the database
 mise run db/reset             # delete the db file (prompts first)
@@ -703,8 +707,19 @@ mise run test/short    # only the fast unit tests
 mise run test/cover    # open an HTML coverage report
 mise run test/fuzz     # 30s of fuzzing per package
 mise run test/bench    # benchmarks, with allocation counts
+mise run test/summary  # tests via gotestsum, readable pass/fail output
 mise run audit         # fmt + vet + tidy + test -race
+mise run lint          # golangci-lint (vet, staticcheck, errcheck, ...)
+mise run vuln          # govulncheck against the Go vulnerability database
 ```
+
+These four — `test/summary`, `test/bench/compare`, `lint`, `vuln` — wrap
+third-party CLIs (`gotestsum`, `benchstat`, `golangci-lint`, `govulncheck`)
+that aren't part of the module's dependencies. Unlike `golang-migrate`
+(manual install, see `db/migrations/new`'s comment), these four are listed in
+`mise.toml`'s `[tools]`, so `mise install` fetches them automatically — no
+separate `go install` step needed. They're kept out of `audit`, which stays
+dependency-free.
 
 Current coverage: **`internal/validator` 100%, `internal/mailer` 93%,
 `internal/data` 91%, `internal/db` 84%, `cmd/api` 81%, `cmd/seed` 73%** —

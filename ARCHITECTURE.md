@@ -275,6 +275,8 @@ mise run test/cover  coverage (-coverpkg=./...), opens an HTML report
 mise run test/fuzz   30s of fuzzing per package
 mise run test/bench  benchmarks with allocation counts
 mise run audit       tidy + fmt + vet + test -race
+mise run lint         golangci-lint (CLI auto-installed via mise.toml [tools])
+mise run vuln         govulncheck (CLI auto-installed via mise.toml [tools])
 ```
 
 **Layers of the suite, roughly outside-in:**

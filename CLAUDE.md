@@ -35,7 +35,17 @@ mise run test/short     # skip database-backed tests (go test -short)
 mise run test/cover     # coverage (-coverpkg=./...), opens HTML report
 mise run test/fuzz      # 30s per target across the 4 fuzz targets
 mise run test/bench     # benchmarks with allocation counts
+mise run test/bench/compare old.txt new.txt  # benchstat diff between two runs
+mise run test/summary   # tests via gotestsum, readable pass/fail output
 mise run audit          # tidy + fmt + vet + test -race  (run before finishing any change)
+mise run lint           # golangci-lint (vet, staticcheck, errcheck, ...)
+mise run vuln           # govulncheck against the Go vulnerability database
+
+# test/summary, test/bench/compare, lint, and vuln each wrap a third-party CLI
+# (gotestsum, benchstat, golangci-lint, govulncheck) that isn't a module
+# dependency. Unlike golang-migrate below (manual install), these four are in
+# mise.toml's [tools], so `mise install` fetches them automatically. Not part
+# of `audit`, which stays dependency-free on purpose.
 
 # Single test:
 go test ./internal/data/ -run TestMovieModel_Insert -v
