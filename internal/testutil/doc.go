@@ -9,7 +9,7 @@
 //	mise run test          # go test -race ./...      — the everyday command
 //	mise run test/short    # go test -short ./...     — skips anything touching a database
 //	mise run test/cover    # coverage, opens an HTML report in your browser
-//	mise run test/fuzz     # 30 seconds of fuzzing per package
+//	mise run test/fuzz     # 30 seconds of fuzzing per target (4 targets, so ~2 min)
 //	mise run test/bench    # benchmarks, with allocation counts
 //	mise run audit         # tidy + fmt + vet + test -race — run before finishing a change
 //
@@ -175,7 +175,7 @@
 // so a function that sleeps for a second finishes instantly and deterministically.
 //
 // Two places use it. internal/mailer/mailer_test.go tests a retry loop with two
-// 500ms sleeps in zero real time. cmd/api/middleware_test.go tests the rate
+// 500ms sleeps in zero real time. cmd/api/rate_limit_test.go tests the rate
 // limiter's janitor, which sweeps once a minute and evicts after three — a
 // four-minute test at real speed.
 //

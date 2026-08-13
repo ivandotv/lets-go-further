@@ -7,6 +7,13 @@ import (
 	"greenlight/internal/assert"
 )
 
+// TestPermissions_Include covers the lookup the requirePermission middleware
+// performs on every protected request.
+//
+// It's a one-line wrapper around slices.Contains, so there's not much logic to
+// break — but it's the last step of the authorization decision, and the cases
+// below pin the two ways a permissive bug could creep in: matching a code that
+// isn't there, and treating an empty set as "allow everything".
 func TestPermissions_Include(t *testing.T) {
 	p := Permissions{"movies:read", "movies:write"}
 
@@ -97,9 +104,21 @@ func TestPermissionModel_AddForUserUnknownCode(t *testing.T) {
 	assert.Equal(t, len(got), 0)
 }
 
+// TestValidPermissionCode covers the guard that exists because of the quiet
+// failure documented in the test above: AddForUser accepts an unknown code
+// without complaint, so anything taking a code from OUTSIDE the codebase has to
+// check it first.
+//
+// The whitespace case is the one to notice. ValidPermissionCode calls
+// strings.TrimSpace, so " movies:read " passes — but Permissions.Include does
+// NOT trim, so if that padded string were ever stored it would never match at
+// authorization time. The asymmetry is deliberate (be lenient about what you
+// accept from a human, exact about what you compare), and this line is here so
+// nobody "tidies up" the TrimSpace without realising it was load-bearing.
 func TestValidPermissionCode(t *testing.T) {
 	assert.Equal(t, ValidPermissionCode(PermissionMoviesRead), true)
 	assert.Equal(t, ValidPermissionCode(PermissionMoviesWrite), true)
+	// Padded, but still valid — see the comment above on why this trims.
 	assert.Equal(t, ValidPermissionCode(" movies:read "), true)
 	assert.Equal(t, ValidPermissionCode("movies:teleport"), false)
 	assert.Equal(t, ValidPermissionCode(""), false)

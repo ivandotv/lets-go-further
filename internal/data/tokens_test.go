@@ -142,6 +142,18 @@ func TestTokenModel_CascadeDeleteOnUser(t *testing.T) {
 	}
 }
 
+// TestValidateTokenPlaintext pins the length check that runs before any
+// database lookup.
+//
+// The only rule is "exactly 26 characters", which is what base32-encoding 16
+// random bytes always produces (see TestGenerateToken above). Checking it up
+// front means an obviously-malformed token is rejected with a clean 422 rather
+// than costing a SHA-256 and a query — worth having on an endpoint anyone can
+// call without credentials.
+//
+// Note what is deliberately NOT validated: whether the characters are valid
+// base32. A wrong-but-well-formed token has to be looked up anyway, so there's
+// nothing to gain from checking the alphabet too.
 func TestValidateTokenPlaintext(t *testing.T) {
 	tests := []struct {
 		name      string

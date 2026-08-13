@@ -55,12 +55,30 @@ func TestFilters_sortColumnPanicsOnUnsafeValue(t *testing.T) {
 	f.sortColumn()
 }
 
+// TestFilters_sortDirection is the other half of the `-title` encoding: this
+// method reads the hyphen that sortColumn above strips off.
+//
+// Splitting one query parameter across two methods like this is a small design
+// wart — get them out of step and you'd sort by the right column in the wrong
+// direction — so both are pinned. The empty case matters too: an absent ?sort=
+// must default to ASC rather than producing `ORDER BY id ` with a dangling
+// direction.
+//
+// Note these are written as one-liners rather than a table. There are only three
+// cases and no setup, so a table would be more scaffolding than test.
 func TestFilters_sortDirection(t *testing.T) {
 	assert.Equal(t, Filters{Sort: "title"}.sortDirection(), "ASC")
 	assert.Equal(t, Filters{Sort: "-title"}.sortDirection(), "DESC")
 	assert.Equal(t, Filters{Sort: ""}.sortDirection(), "ASC")
 }
 
+// TestFilters_limitAndOffset covers the pagination arithmetic that becomes the
+// query's LIMIT and OFFSET.
+//
+// The offset is where the off-by-one lives: page 1 must start at row 0, not row
+// 20. Get it wrong by one page and every client silently skips or repeats a
+// whole page of results — the kind of bug that's invisible until someone
+// notices a missing record.
 func TestFilters_limitAndOffset(t *testing.T) {
 	tests := []struct {
 		name       string

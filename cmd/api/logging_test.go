@@ -7,7 +7,33 @@ import (
 	"greenlight/internal/assert"
 )
 
+// ─────────────────────────────────────────────────────────────────────────────
+// OBSERVABILITY MIDDLEWARE
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// logging.go holds two middlewares, and only one of them is asserted on here.
+//
+// logRequest is EXECUTED by every test in this package — it's in the chain
+// routes() builds — but nothing checks what it logged, because
+// newTestApplication points the logger at io.Discard to keep a passing run
+// readable. That's a deliberate trade rather than an oversight: the log lines
+// aren't a contract anyone programs against, so pinning their format would
+// mostly create work when someone adds a field. (The one place log OUTPUT is
+// asserted is errors_test.go, where the point is that internal error detail
+// reaches the log instead of the client.)
+//
+// The metrics middleware is different: /debug/vars is a real endpoint with real
+// consumers, so it gets a real test.
+
 // TestMetricsEndpoint checks that expvar is wired up and counting.
+//
+// Worth knowing why the counters are package-level vars in logging.go rather
+// than declared inside the middleware as the book has them: expvar.NewInt
+// panics on a duplicate name, and this suite builds a fresh application — and
+// therefore a fresh chain — for every test. Declared per-chain, the SECOND test
+// in this package would panic. So this test passing at all depends on that
+// detail, which is the sort of thing worth noticing when it looks like a
+// pointless deviation from the book.
 func TestMetricsEndpoint(t *testing.T) {
 	app, _ := newTestApplication(t)
 	ts := newTestServer(t, app.routes())
