@@ -164,6 +164,7 @@ description = "scan module dependencies against the Go vulnerability database"
 run = "govulncheck ./..."
 
 [tasks.test]
+# TODO - maybe remove in favor of test/summary? 
 description = "run all Test* functions (see test/fuzz and test/bench for the rest)"
 run = "go test -race ./..."
 
