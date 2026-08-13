@@ -76,9 +76,9 @@ func (app *application) writeJSON(w http.ResponseWriter, status int, data envelo
 	// ORDER MATTERS: every header must be set before WriteHeader is called.
 	// After that the status line has gone out and header changes are ignored.
 	w.WriteHeader(status)
-	w.Write(js)
+	_, err = w.Write(js)
 
-	return nil
+	return err
 }
 
 // readJSON decodes a JSON request body into dst, converting the standard

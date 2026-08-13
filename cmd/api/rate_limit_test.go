@@ -312,9 +312,9 @@ func getAsClient(t *testing.T, ts *testServer, urlPath, ip string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rs.Body.Close()
+	defer func() { _ = rs.Body.Close() }()
 
-	io.Copy(io.Discard, rs.Body)
+	_, _ = io.Copy(io.Discard, rs.Body)
 
 	return rs.StatusCode
 }

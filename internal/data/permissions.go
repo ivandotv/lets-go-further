@@ -52,7 +52,7 @@ func (m PermissionModel) GetAllForUser(userID int64) (Permissions, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Start with an empty non-nil slice so callers can range over the result
 	// without a nil check.

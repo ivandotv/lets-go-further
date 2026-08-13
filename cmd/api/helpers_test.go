@@ -25,7 +25,7 @@ func TestWriteJSON(t *testing.T) {
 	assert.NilError(t, err)
 
 	rs := rr.Result()
-	defer rs.Body.Close()
+	defer func() { _ = rs.Body.Close() }()
 
 	assert.Equal(t, rs.StatusCode, http.StatusCreated)
 	assert.Equal(t, rs.Header.Get("Content-Type"), "application/json")

@@ -281,7 +281,7 @@ func startSMTP(t *testing.T, accept bool) *fakeSMTP {
 	if err != nil {
 		t.Fatalf("starting fake SMTP listener: %v", err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 
 	addr := ln.Addr().(*net.TCPAddr)
 	srv := &fakeSMTP{host: addr.IP.String(), port: addr.Port}
@@ -299,7 +299,7 @@ func startSMTP(t *testing.T, accept bool) *fakeSMTP {
 			srv.mu.Unlock()
 
 			if !accept {
-				conn.Close()
+				_ = conn.Close()
 				continue
 			}
 
@@ -311,17 +311,17 @@ func startSMTP(t *testing.T, accept bool) *fakeSMTP {
 }
 
 func (s *fakeSMTP) handle(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// A generous deadline so a stuck test fails rather than hanging forever.
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	var (
 		reader = bufio.NewReader(conn)
 		msg    receivedMessage
 	)
 
-	fmt.Fprint(conn, "220 fake.smtp.test ESMTP ready\r\n")
+	_, _ = fmt.Fprint(conn, "220 fake.smtp.test ESMTP ready\r\n")
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -336,23 +336,23 @@ func (s *fakeSMTP) handle(conn net.Conn) {
 		case "EHLO":
 			// Multi-line reply: every line but the last uses '-' after the
 			// code. Note the deliberate absence of STARTTLS and AUTH.
-			fmt.Fprint(conn, "250-fake.smtp.test\r\n")
-			fmt.Fprint(conn, "250-8BITMIME\r\n")
-			fmt.Fprint(conn, "250 SIZE 35882577\r\n")
+			_, _ = fmt.Fprint(conn, "250-fake.smtp.test\r\n")
+			_, _ = fmt.Fprint(conn, "250-8BITMIME\r\n")
+			_, _ = fmt.Fprint(conn, "250 SIZE 35882577\r\n")
 
 		case "HELO":
-			fmt.Fprint(conn, "250 fake.smtp.test\r\n")
+			_, _ = fmt.Fprint(conn, "250 fake.smtp.test\r\n")
 
 		case "MAIL":
 			msg.from = extractAddress(rest)
-			fmt.Fprint(conn, "250 2.1.0 OK\r\n")
+			_, _ = fmt.Fprint(conn, "250 2.1.0 OK\r\n")
 
 		case "RCPT":
 			msg.recipients = append(msg.recipients, extractAddress(rest))
-			fmt.Fprint(conn, "250 2.1.5 OK\r\n")
+			_, _ = fmt.Fprint(conn, "250 2.1.5 OK\r\n")
 
 		case "DATA":
-			fmt.Fprint(conn, "354 Start mail input; end with <CRLF>.<CRLF>\r\n")
+			_, _ = fmt.Fprint(conn, "354 Start mail input; end with <CRLF>.<CRLF>\r\n")
 
 			var body strings.Builder
 
@@ -378,21 +378,21 @@ func (s *fakeSMTP) handle(conn net.Conn) {
 
 			msg = receivedMessage{}
 
-			fmt.Fprint(conn, "250 2.0.0 OK\r\n")
+			_, _ = fmt.Fprint(conn, "250 2.0.0 OK\r\n")
 
 		case "RSET":
 			msg = receivedMessage{}
-			fmt.Fprint(conn, "250 2.0.0 OK\r\n")
+			_, _ = fmt.Fprint(conn, "250 2.0.0 OK\r\n")
 
 		case "NOOP":
-			fmt.Fprint(conn, "250 2.0.0 OK\r\n")
+			_, _ = fmt.Fprint(conn, "250 2.0.0 OK\r\n")
 
 		case "QUIT":
-			fmt.Fprint(conn, "221 2.0.0 Bye\r\n")
+			_, _ = fmt.Fprint(conn, "221 2.0.0 Bye\r\n")
 			return
 
 		default:
-			fmt.Fprint(conn, "500 5.5.1 Unrecognised command\r\n")
+			_, _ = fmt.Fprint(conn, "500 5.5.1 Unrecognised command\r\n")
 		}
 	}
 }

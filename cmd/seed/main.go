@@ -105,7 +105,7 @@ func run(cfg config, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Make sure the schema exists — seeding a brand-new database should just
 	// work without running the API server first.
@@ -133,12 +133,12 @@ func run(cfg config, out io.Writer) error {
 	err = models.Users.Insert(user)
 	switch {
 	case err == nil:
-		fmt.Fprintf(out, "created user %s\n", user.Email)
+		_, _ = fmt.Fprintf(out, "created user %s\n", user.Email)
 
 	case errors.Is(err, data.ErrDuplicateEmail):
 		// Make the command re-runnable: if the user already exists, look them
 		// up and carry on rather than failing.
-		fmt.Fprintf(out, "user %s already exists, reusing it\n", cfg.email)
+		_, _ = fmt.Fprintf(out, "user %s already exists, reusing it\n", cfg.email)
 
 		user, err = models.Users.GetByEmail(cfg.email)
 		if err != nil {
@@ -181,7 +181,7 @@ func run(cfg config, out io.Writer) error {
 	}
 
 	if len(existing) > 0 {
-		fmt.Fprintln(out, "movies table is not empty, skipping sample movies")
+		_, _ = fmt.Fprintln(out, "movies table is not empty, skipping sample movies")
 	} else {
 		for _, m := range movies {
 			movie := &data.Movie{
@@ -196,7 +196,7 @@ func run(cfg config, out io.Writer) error {
 			}
 		}
 
-		fmt.Fprintf(out, "inserted %d sample movies\n", len(movies))
+		_, _ = fmt.Fprintf(out, "inserted %d sample movies\n", len(movies))
 	}
 
 	// ── A fixed authentication token to use straight away ────────────────────
@@ -225,7 +225,7 @@ func run(cfg config, out io.Writer) error {
 		return err
 	}
 
-	fmt.Fprintf(out, `
+	_, _ = fmt.Fprintf(out, `
 Demo user ready.
 
   email:    %s

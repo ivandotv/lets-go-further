@@ -126,7 +126,7 @@ func TestHealthcheckReportsVersionAndEnv(t *testing.T) {
 	app.healthcheckHandler(rr, httptest.NewRequest(http.MethodGet, "/v1/healthcheck", nil))
 
 	rs := rr.Result()
-	defer rs.Body.Close()
+	defer func() { _ = rs.Body.Close() }()
 
 	assert.Equal(t, rs.StatusCode, http.StatusOK)
 

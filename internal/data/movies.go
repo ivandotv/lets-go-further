@@ -307,7 +307,7 @@ func (m MovieModel) GetAll(title string, genres []string, filters Filters) ([]*M
 	// Closing the rows releases the underlying connection back to the pool.
 	// Forgetting this leaks connections until the pool is exhausted and the
 	// application deadlocks — one of the nastiest bugs to track down.
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	totalRecords := 0
 	// Initialise as an empty (non-nil) slice, so that "no results" encodes as

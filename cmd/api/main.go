@@ -226,7 +226,11 @@ func run() error {
 	}
 	// This defer is why run() exists as a separate function from main(): a
 	// deferred call does NOT run if you call os.Exit.
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			logger.Error("closing database", "error", err)
+		}
+	}()
 
 	// Apply any pending migrations on startup. Safe to run every time — it's a
 	// no-op once the schema is current.

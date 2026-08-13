@@ -229,7 +229,7 @@ func TestMalformedAuthorizationHeader(t *testing.T) {
 
 			rs, err := ts.Client().Do(req)
 			assert.NilError(t, err)
-			defer rs.Body.Close()
+			defer func() { _ = rs.Body.Close() }()
 
 			assert.Equal(t, rs.StatusCode, http.StatusUnauthorized)
 

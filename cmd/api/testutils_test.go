@@ -253,7 +253,7 @@ func (ts *testServer) do(t *testing.T, method, urlPath, token string, body any) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rs.Body.Close()
+	defer func() { _ = rs.Body.Close() }()
 
 	responseBody, err := io.ReadAll(rs.Body)
 	if err != nil {

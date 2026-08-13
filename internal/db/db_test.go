@@ -122,7 +122,7 @@ func TestPragmasApplyToEveryConnection(t *testing.T) {
 	// helper, defer fires far too early.)
 	t.Cleanup(func() {
 		for _, c := range held {
-			c.Close()
+			_ = c.Close()
 		}
 	})
 
@@ -190,7 +190,7 @@ func TestOpenDBAppliesPoolSettings(t *testing.T) {
 		MaxIdleTime:  0,
 	})
 	assert.NilError(t, err)
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	assert.Equal(t, database.Stats().MaxOpenConnections, 7)
 }
@@ -208,7 +208,7 @@ func TestOpenDBFailsOnUnusablePath(t *testing.T) {
 
 	database, err := OpenDB(Config{DSN: dsn, MaxOpenConns: 1, MaxIdleConns: 1})
 	if err == nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatal("got nil error opening a database in a non-existent directory; want failure")
 	}
 
@@ -317,7 +317,7 @@ func TestMigrateUpAcrossRestarts(t *testing.T) {
 		assert.NilError(t, err)
 		assert.Equal(t, count, 1)
 
-		database.Close()
+		_ = database.Close()
 	}
 }
 
@@ -337,7 +337,7 @@ func openTestDB(t *testing.T, maxOpen int) *sql.DB {
 	})
 	assert.NilError(t, err)
 
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	return database
 }

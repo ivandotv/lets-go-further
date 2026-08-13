@@ -146,7 +146,7 @@ func TestServeReturnsErrorOnUnavailablePort(t *testing.T) {
 	// 0.0.0.0:port, and the test would then hang instead of failing.
 	ln, err := net.Listen("tcp", ":0")
 	assert.NilError(t, err)
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 
 	var cfg config
 	cfg.port = ln.Addr().(*net.TCPAddr).Port
@@ -187,9 +187,9 @@ func registerUser(t *testing.T, baseURL, email string) {
 	if err != nil {
 		t.Fatalf("registering a user: %v", err)
 	}
-	defer rs.Body.Close()
+	defer func() { _ = rs.Body.Close() }()
 
-	io.Copy(io.Discard, rs.Body)
+	_, _ = io.Copy(io.Discard, rs.Body)
 
 	if rs.StatusCode != http.StatusAccepted {
 		t.Fatalf("registering a user: got status %d; want 202", rs.StatusCode)
@@ -208,7 +208,7 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("finding a free port: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	return ln.Addr().(*net.TCPAddr).Port
 }
@@ -223,7 +223,7 @@ func waitUntilServing(t *testing.T, url string) {
 	for time.Now().Before(deadline) {
 		rs, err := http.Get(url)
 		if err == nil {
-			rs.Body.Close()
+			_ = rs.Body.Close()
 			return
 		}
 

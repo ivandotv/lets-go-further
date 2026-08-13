@@ -25,7 +25,7 @@ func TestRecoverPanic(t *testing.T) {
 	// *http.Response itself — see the Close assertion below.
 	rs, err := ts.Client().Get(ts.URL + "/")
 	assert.NilError(t, err)
-	defer rs.Body.Close()
+	defer func() { _ = rs.Body.Close() }()
 
 	body, err := io.ReadAll(rs.Body)
 	assert.NilError(t, err)

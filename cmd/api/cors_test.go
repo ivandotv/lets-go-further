@@ -22,7 +22,7 @@ func TestCORS(t *testing.T) {
 
 		rs, err := ts.Client().Do(req)
 		assert.NilError(t, err)
-		defer rs.Body.Close()
+		defer func() { _ = rs.Body.Close() }()
 
 		assert.Equal(t, rs.Header.Get("Access-Control-Allow-Origin"), "https://trusted.example.com")
 	})
@@ -34,7 +34,7 @@ func TestCORS(t *testing.T) {
 
 		rs, err := ts.Client().Do(req)
 		assert.NilError(t, err)
-		defer rs.Body.Close()
+		defer func() { _ = rs.Body.Close() }()
 
 		// The request still succeeds — CORS is enforced by the BROWSER, not the
 		// server. What matters is that we don't hand out permission.
@@ -51,7 +51,7 @@ func TestCORS(t *testing.T) {
 
 		rs, err := ts.Client().Do(req)
 		assert.NilError(t, err)
-		defer rs.Body.Close()
+		defer func() { _ = rs.Body.Close() }()
 
 		assert.Equal(t, rs.StatusCode, http.StatusOK)
 		assert.Equal(t, rs.Header.Get("Access-Control-Allow-Origin"), "https://trusted.example.com")

@@ -256,7 +256,7 @@ func openDB(t *testing.T, cfg config) *sql.DB {
 	database, err := db.OpenDB(db.Config{DSN: cfg.dsn, MaxOpenConns: 2, MaxIdleConns: 2})
 	assert.NilError(t, err)
 
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	return database
 }

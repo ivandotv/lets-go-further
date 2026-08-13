@@ -130,7 +130,7 @@ func OpenDB(cfg Config) (*sql.DB, error) {
 
 	if err := database.PingContext(ctx); err != nil {
 		// Don't leak the pool if the ping failed.
-		database.Close()
+		_ = database.Close()
 		return nil, err
 	}
 
@@ -149,7 +149,7 @@ func MigrateUp(database *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("db: loading migrations: %w", err)
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 
 	// WithInstance wraps our existing *sql.DB as a migration *target*, so
 	// migrations run over the same pool (and therefore the same PRAGMAs) as

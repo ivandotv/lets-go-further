@@ -132,7 +132,7 @@ func TestErrorResponses(t *testing.T) {
 			tt.call(rr, r)
 
 			rs := rr.Result()
-			defer rs.Body.Close()
+			defer func() { _ = rs.Body.Close() }()
 
 			assert.Equal(t, rs.StatusCode, tt.wantStatus)
 			assert.Equal(t, rs.Header.Get("Content-Type"), "application/json")
@@ -189,7 +189,7 @@ func TestServerErrorResponseHidesDetail(t *testing.T) {
 	app.serverErrorResponse(rr, r, assertableError(secret))
 
 	rs := rr.Result()
-	defer rs.Body.Close()
+	defer func() { _ = rs.Body.Close() }()
 
 	body, err := io.ReadAll(rs.Body)
 	assert.NilError(t, err)
@@ -226,7 +226,7 @@ func TestFailedValidationResponse(t *testing.T) {
 	})
 
 	rs := rr.Result()
-	defer rs.Body.Close()
+	defer func() { _ = rs.Body.Close() }()
 
 	assert.Equal(t, rs.StatusCode, http.StatusUnprocessableEntity)
 

@@ -223,14 +223,14 @@ func (app *application) listMoviesHandler(w http.ResponseWriter, r *http.Request
 	input.Title = app.readString(qs, "title", "")
 	input.Genres = app.readCSV(qs, "genres", []string{})
 
-	input.Filters.Page = app.readInt(qs, "page", 1, v)
-	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
-	input.Filters.Sort = app.readString(qs, "sort", "id")
+	input.Page = app.readInt(qs, "page", 1, v)
+	input.PageSize = app.readInt(qs, "page_size", 20, v)
+	input.Sort = app.readString(qs, "sort", "id")
 
 	// The safelist is set HERE, by us — never from client input. It's what
 	// makes interpolating the sort column into the SQL safe. See
 	// data.Filters.sortColumn.
-	input.Filters.SortSafelist = []string{
+	input.SortSafelist = []string{
 		"id", "title", "year", "runtime",
 		"-id", "-title", "-year", "-runtime",
 	}

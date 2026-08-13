@@ -77,7 +77,7 @@ func NewDB(t testing.TB) *sql.DB {
 	// order. It's preferable to `defer` in a helper, because a deferred call
 	// here would run when NewDB returns — long before the test is done.
 	t.Cleanup(func() {
-		database.Close()
+		_ = database.Close()
 	})
 
 	return database
