@@ -221,19 +221,122 @@ that's what lets each test build a completely independent app instance.
 
 ---
 
-## 7. Boot sequence (`cmd/api/main.go: run()`)
+## 7. Process lifecycle: startup, serving, shutdown
+
+Three phases, spread across two files: `cmd/api/main.go` (`main` → `run`) and
+`cmd/api/server.go` (`serve`).
+
+### 7.1 Startup — `main()` → `run()`
 
 ```
-parse flags → build logger → open SQLite (internal/db.OpenDB)
-   → apply pending migrations (internal/db.MigrateUp)
-   → register expvar metrics
-   → build *application{config, logger, models, mailer}
-   → app.serve()   (HTTP server with graceful shutdown)
+main()
+  │   does as little as possible: call run(), print its error, exit(1).
+  ▼
+run()                    returns an error instead of calling os.Exit —
+  │                      os.Exit skips deferred calls, and this function
+  │                      has one that matters (see below)
+  │
+  ├─ flag.Parse()             → config struct: port, env, db dsn + pool,
+  │                             limiter, smtp, cors. Every knob, one place.
+  ├─ slog JSON handler        → structured logs on stdout
+  ├─ db.OpenDB()              → SQLite pool; PRAGMAs ride in the DSN
+  │    └─ defer database.Close()    ← the whole reason run() ≠ main()
+  ├─ db.MigrateUp()           → embedded migrations/*.sql; no-op if current
+  ├─ expvar.Publish(…)        → version, goroutine count, pool stats,
+  │                             served lazily at GET /debug/vars
+  ├─ &application{…}          → config, logger, models, mailer,
+  │                             wg (WaitGroup), shutdown (chan struct{})
+  └─ app.serve()              → blocks for the rest of the process's life
 ```
 
-Nothing here can silently fail: `run()` returns an `error`, and `main()` just
-prints it and exits — so every deferred cleanup (like closing the database)
-still runs on the way out.
+Nothing here can silently fail: every step returns an `error` up to `main()`,
+and because `run()` returns rather than exits, `database.Close()` always runs.
+
+### 7.2 Serving — steady state
+
+`serve()` builds the `http.Server` (handler, timeouts on every axis, the app's
+`slog` handler for the server's *own* errors), then four kinds of goroutine
+coexist:
+
+```
+┌─────────────────────┬──────────────────────────────────────────────────┐
+│ main goroutine      │ blocked in srv.ListenAndServe()                  │
+├─────────────────────┼──────────────────────────────────────────────────┤
+│ signal goroutine    │ blocked on <-quit, waiting for SIGINT/SIGTERM    │
+├─────────────────────┼──────────────────────────────────────────────────┤
+│ janitor goroutine   │ started by rateLimit when app.routes() was       │
+│                     │ called; sweeps stale client IPs every minute;    │
+│                     │ selects on app.shutdown  → "tell it to STOP"     │
+├─────────────────────┼──────────────────────────────────────────────────┤
+│ 0..n background     │ spawned per request by app.background() —        │
+│ goroutines          │ welcome/activation email, each with its own      │
+│                     │ recover; tracked by app.wg  → "wait to FINISH"   │
+└─────────────────────┴──────────────────────────────────────────────────┘
+```
+
+Note that `app.routes()` is not purely a wiring call — building the chain is
+what starts the janitor.
+
+### 7.3 Shutdown — the ordering is the design
+
+```
+   SIGINT (Ctrl+C) / SIGTERM (Docker, k8s, systemd)
+        │                       SIGKILL is deliberately absent: uncatchable
+        ▼
+ ┌─ signal goroutine ──────────────────┐   ┌─ main goroutine ──────────────┐
+ │                                     │   │                               │
+ │ srv.Shutdown(ctx)  ─── unblocks ────┼──►│ ListenAndServe returns        │
+ │   1. stop accepting connections     │   │ http.ErrServerClosed          │
+ │   2. close idle keep-alives         │   │   ↑ the SUCCESS case, and it  │
+ │   3. wait for active ones to finish │   │     arrives BEFORE the drain  │
+ │   ctx deadline: 30s                 │   │     has finished              │
+ │        └─ blown? send err, skip     │   │                               │
+ │           straight to the send      │   ▼                               │
+ │        │ drained cleanly            │   <-shutdownError   (blocks here) │
+ │        ▼                            │   │  this receive is what makes   │
+ │ app.stop()                          │   │  the shutdown graceful        │
+ │   close(app.shutdown)               │   │                               │
+ │   → janitor's select returns        │   │                               │
+ │        │                            │   │                               │
+ │        ▼                            │   │                               │
+ │ app.wg.Wait()                       │   │                               │
+ │   in-flight emails land             │   │                               │
+ │   (no deadline of its own)          │   │                               │
+ │        │                            │   │                               │
+ │        ▼                            │   │                               │
+ │ shutdownError <- nil  ──────────────┼──►│ …the receive completes        │
+ └─────────────────────────────────────┘   │              │                │
+                                           │              ▼                │
+                                           │ serve() returns nil           │
+                                           └──────────────┬────────────────┘
+                                                       ▼
+                                        run()'s defer: database.Close()
+                                                       │
+                                                       ▼
+                                                   process exits
+```
+
+Each step is where it is for a reason:
+
+- **`srv.Shutdown` first.** Drain requests before dismantling anything they
+  might still depend on.
+- **`app.stop()` second**, once nothing is being served — killing the janitor
+  while requests were live would pull the rug from under an active handler.
+- **`app.wg.Wait()` last**, because that work has no other exit condition.
+- **The main goroutine blocks on `shutdownError`.** Without that receive,
+  `serve()` would return the instant `Shutdown` was *called*, `run()` would
+  close the database, and the process would exit with requests and emails still
+  in flight. `TestServeGracefulShutdown` asserts precisely this.
+
+Three consequences worth knowing (rationale in
+[README.md](README.md#startup-serving-and-shutdown)):
+
+- The 30s grace bounds `srv.Shutdown` **only** — `app.wg.Wait()` is unbounded.
+- A **second Ctrl+C does nothing**; `signal.Notify` replaced the default
+  terminate behaviour. Aborting a wedged drain takes `SIGKILL`.
+- Any error from `ListenAndServe` other than `ErrServerClosed` (port in use,
+  say) returns immediately, leaving the signal goroutine parked forever —
+  harmless on the way out, but it makes `serve()` a once-per-process call.
 
 ---
 

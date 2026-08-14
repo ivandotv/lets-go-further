@@ -22,12 +22,13 @@ architecture and every place where SQLite forced a change from the book.
 4. [API endpoints](#api-endpoints)
 5. [Project layout](#project-layout)
 6. [How a request flows through the app](#how-a-request-flows-through-the-app)
-7. [PostgreSQL → SQLite: every difference](#postgresql--sqlite-every-difference)
-8. [The packages, and why each one](#the-packages-and-why-each-one)
-9. [Design decisions worth understanding](#design-decisions-worth-understanding)
-10. [Testing](#testing)
-11. [Where this deviates from the books](#where-this-deviates-from-the-books)
-12. [Going further from here](#going-further-from-here)
+7. [Startup, serving, and shutdown](#startup-serving-and-shutdown)
+8. [PostgreSQL → SQLite: every difference](#postgresql--sqlite-every-difference)
+9. [The packages, and why each one](#the-packages-and-why-each-one)
+10. [Design decisions worth understanding](#design-decisions-worth-understanding)
+11. [Testing](#testing)
+12. [Where this deviates from the books](#where-this-deviates-from-the-books)
+13. [Going further from here](#going-further-from-here)
 
 ---
 
@@ -324,6 +325,152 @@ orderings that matter:
 `requireActivatedUser`, which wraps `requireAuthenticatedUser`. You cannot
 accidentally let an anonymous user through by forgetting a wrapper, because
 asking for a permission automatically demands everything beneath it.
+
+---
+
+## Startup, serving, and shutdown
+
+The previous section follows one request. This one follows the *process*: how it
+comes up, what's running while it serves, and how it puts itself down without
+dropping work on the floor. Two files —
+[`cmd/api/main.go`](cmd/api/main.go) (`main` → `run`) and
+[`cmd/api/server.go`](cmd/api/server.go) (`serve`).
+
+### The whole thing on one timeline
+
+```
+ t=0   main()
+       └─ run()  ─── returns error; never calls os.Exit, because os.Exit
+            │        would skip the defer three lines down
+            │
+            ├─ flag.Parse()          config struct — port, env, db dsn + pool,
+            │                        limiter, smtp, cors. Every knob, one place.
+            ├─ slog JSON handler     structured logs on stdout
+            ├─ db.OpenDB()           SQLite pool; PRAGMAs ride in the DSN
+            │    └─ defer database.Close()      ← the reason run() ≠ main()
+            ├─ db.MigrateUp()        embedded migrations/*.sql; no-op if current
+            ├─ expvar.Publish(…)     version, goroutines, pool stats,
+            │                        evaluated lazily at GET /debug/vars
+            ├─ &application{…}       config, logger, models, mailer,
+            │                        wg (WaitGroup), shutdown (chan struct{})
+            │
+            └─ app.serve()
+                 │
+                 ├─ &http.Server{Handler: app.routes(), …timeouts…}
+                 │       └─ side effect: rateLimit starts the janitor here
+                 ├─ shutdownError := make(chan error, 1)
+                 ├─ go func(){ …signal handler… }
+                 │
+ ═══════════════ ▼ ════════════════════════════════════════════════════════
+ serving         srv.ListenAndServe()          ← main goroutine parks here
+                 <-quit                        ← signal goroutine parks here
+                 ticker/select on app.shutdown ← janitor sweeps stale IPs
+                 app.background(…)             ← 0..n emails in flight, on wg
+ ═══════════════ ▲ ════════════════════════════════════════════════════════
+                 │
+ t=∞   SIGINT (Ctrl+C) / SIGTERM (Docker, k8s, systemd) arrives
+```
+
+Four goroutines, two of them parked, is the entire steady state. Note the third
+one: `app.routes()` is not purely a wiring call — building the middleware chain
+is what starts the rate limiter's janitor.
+
+### Shutdown, step by step
+
+The two goroutines converge. Read the columns as two independent timelines that
+meet at the channel:
+
+```
+ ┌─ signal goroutine ─────────────────────┐  ┌─ main goroutine ───────────────┐
+ │                                        │  │                                │
+ │ s := <-quit          wakes on the      │  │ blocked in ListenAndServe()    │
+ │                      signal            │  │                                │
+ │        │                               │  │                                │
+ │        ▼                               │  │                                │
+ │ ctx, cancel := 30s timeout             │  │                                │
+ │        │                               │  │                                │
+ │        ▼                               │  │                                │
+ │ srv.Shutdown(ctx)  ──── unblocks ──────┼─►│ returns http.ErrServerClosed   │
+ │   1. close the listeners               │  │   ↑ the SUCCESS case — and it  │
+ │   2. close idle keep-alives            │  │     lands BEFORE the drain has │
+ │   3. wait for active conns to go idle  │  │     actually finished          │
+ │        │                               │  │            │                   │
+ │        ├─ deadline blown → send err,   │  │            ▼                   │
+ │        │  return early (skip the rest) │  │ <-shutdownError    ← blocks    │
+ │        ▼ drained cleanly               │  │   the receive that makes the   │
+ │ app.stop()                             │  │   shutdown actually graceful   │
+ │   close(app.shutdown)                  │  │            │                   │
+ │   → the janitor's select returns       │  │            │                   │
+ │        │                               │  │            │                   │
+ │        ▼                               │  │            │                   │
+ │ app.wg.Wait()                          │  │            │                   │
+ │   in-flight welcome emails land        │  │            │                   │
+ │   (no deadline of its own)             │  │            │                   │
+ │        │                               │  │            │                   │
+ │        ▼                               │  │            │                   │
+ │ shutdownError <- nil  ─────────────────┼─►│ …the receive completes         │
+ └────────────────────────────────────────┘  │            │                   │
+                                             │            ▼                   │
+                                             │ serve() returns nil            │
+                                             └────────────┬───────────────────┘
+                                                          ▼
+                                           run()'s defer: database.Close()
+                                                          ▼
+                                                    process exits
+```
+
+**Every step is where it is for a reason:**
+
+| Step | Why here |
+|---|---|
+| `srv.Shutdown` **first** | Drain requests before dismantling anything they might still be using. |
+| `app.stop()` **second** | Killing the janitor while requests were live would pull the rug from under an active handler. By now nothing is being served. |
+| `app.wg.Wait()` **last** | It's the only work with no other exit condition. Reversing it with `stop()` would mean signalling a half-sent email — see [Two mechanisms for background goroutines](#two-mechanisms-for-background-goroutines). |
+| `<-shutdownError` in `serve()` | Without it, `serve()` returns the moment `Shutdown` is *called*, `run()` closes the database, and the process exits mid-flight. `TestServeGracefulShutdown` asserts exactly this by checking the recorder mailer got its message *after* `serve()` returned. |
+
+### The timeouts, and why every one is set
+
+The zero value for all of these is *no timeout*, which is how a single slow
+client holds a connection open forever:
+
+| Field | Value | Bounds |
+|---|---|---|
+| `IdleTimeout` | 1 min | How long a keep-alive connection may sit unused. |
+| `ReadTimeout` | 5 s | Accept → finished reading the request body. This is the slow-loris cap. |
+| `WriteTimeout` | 10 s | Writing the response. |
+
+`WriteTimeout` (10s) is far below the shutdown grace period (30s), so no
+in-flight request can actually consume the full grace — the write timeout kills
+it first. The headroom is for connection bookkeeping, not slow handlers.
+
+`ErrorLog` is set too, so the server's *own* errors (bad TLS handshakes,
+malformed request lines) come out as JSON alongside everything else.
+`slog.NewLogLogger` adapts the app's `slog` handler into the `*log.Logger` that
+`net/http` expects; the default would write unstructured text to stderr and
+break log parsing.
+
+### Sharp edges worth knowing
+
+- **The 30s grace bounds `srv.Shutdown` only.** `app.wg.Wait()` afterwards has
+  no deadline — a wedged SMTP send would hang the process. What keeps that
+  honest is `internal/mailer`'s own retry and timeout budget, not `serve()`.
+- **A second Ctrl+C does nothing.** Registering with `signal.Notify` removes
+  Go's default terminate-on-signal behaviour; the second signal lands in the
+  buffered channel with nobody reading it. Aborting a wedged drain takes
+  `SIGKILL` — which is also why `SIGKILL` isn't in the `Notify` list at all: it
+  cannot be caught. (For a "press again to force" escape hatch, add a second
+  `<-quit` in that goroutine calling `os.Exit(1)`.)
+- **The signal channel must be buffered.** On a signal the runtime does a
+  non-blocking send and silently drops it if there's no room.
+- **`ErrServerClosed` is the success case.** Treating any non-nil error from
+  `ListenAndServe` as a failure would report every clean shutdown as a crash.
+- **`serve()` is a once-per-process call.** A genuine listen error (port already
+  in use) returns immediately, leaving the signal goroutine parked on `<-quit`
+  forever. Harmless — the process is exiting anyway, and
+  `TestServeReturnsErrorOnUnavailablePort` covers the path — but a second
+  `serve()` would stack another one on top.
+- **`shutdownError` is buffered for that same path.** Unbuffered, the signal
+  goroutine would block forever on a send nobody will receive.
 
 ---
 

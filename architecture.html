@@ -187,15 +187,29 @@
     color: var(--ink);
   }
 
-  /* ---------- nav rail ---------- */
+  /* ---------- nav rail ----------
+     Below 1040px the rail is an off-canvas drawer opened by the fixed
+     hamburger button; from 1040px up it becomes the sticky sidebar. */
 
   .rail {
-    display: none;
-    position: sticky;
-    top: 2.5rem;
-    align-self: start;
-    padding-bottom: 4rem;
+    position: fixed;
+    z-index: 60;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(19rem, 84vw);
+    padding: 4.4rem 1.4rem 2.5rem;
+    background: var(--surface);
+    border-right: 1px solid var(--line-strong);
+    box-shadow: 0 0 40px hsl(152 18% 7% / 0.16);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.3s;
   }
+  body.rail-open .rail { transform: none; visibility: visible; }
+
   .rail-title {
     font-family: var(--font-mono);
     font-size: 0.66rem;
@@ -209,21 +223,100 @@
   .rail a {
     display: flex;
     gap: 0.6rem;
-    padding: 0.4rem 0 0.4rem 0.9rem;
+    padding: 0.55rem 0 0.55rem 0.9rem;
     margin-left: -1px;
     border-left: 1px solid transparent;
     color: var(--ink-soft);
     text-decoration: none;
-    font-size: 0.86rem;
+    font-size: 0.95rem;
   }
   .rail a .n { font-family: var(--font-mono); color: var(--ink-faint); font-size: 0.78rem; }
   .rail a:hover { color: var(--ink); }
   .rail a.active { color: var(--ink); border-left-color: var(--accent); }
   .rail a.active .n { color: var(--accent); }
 
+  /* hamburger — fixed so the contents are reachable at any scroll depth */
+
+  .rail-toggle {
+    position: fixed;
+    z-index: 70;
+    top: max(0.85rem, env(safe-area-inset-top, 0px));
+    left: max(0.85rem, env(safe-area-inset-left, 0px));
+    width: 2.75rem;
+    height: 2.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    color: var(--ink);
+    background: var(--surface);
+    background: color-mix(in srgb, var(--surface) 90%, transparent);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    box-shadow: 0 1px 2px hsl(152 18% 7% / 0.07), 0 6px 18px hsl(152 18% 7% / 0.08);
+    cursor: pointer;
+  }
+
+  .rail-toggle .bars { position: relative; display: block; width: 17px; height: 12px; }
+  .rail-toggle .bars span {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1.5px;
+    border-radius: 1px;
+    background: currentColor;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s linear;
+  }
+  .rail-toggle .bars span:nth-child(1) { top: 0; }
+  .rail-toggle .bars span:nth-child(2) { top: 5.25px; }
+  .rail-toggle .bars span:nth-child(3) { top: 10.5px; }
+  body.rail-open .rail-toggle .bars span:nth-child(1) { transform: translateY(5.25px) rotate(45deg); }
+  body.rail-open .rail-toggle .bars span:nth-child(2) { opacity: 0; }
+  body.rail-open .rail-toggle .bars span:nth-child(3) { transform: translateY(-5.25px) rotate(-45deg); }
+
+  .rail-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: hsl(152 18% 7% / 0.45);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s;
+  }
+  body.rail-open .rail-scrim { opacity: 1; visibility: visible; }
+
+  @media (max-width: 1039.98px) {
+    body.rail-open { overflow: hidden; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rail, .rail-scrim, .rail-toggle .bars span { transition-duration: 0.01ms; }
+  }
+
   @media (min-width: 1040px) {
     .shell { grid-template-columns: 200px minmax(0, 1fr); column-gap: clamp(2rem, 4vw, 4rem); align-items: start; }
-    .rail { display: block; }
+    .rail {
+      position: sticky;
+      top: 2.5rem;
+      left: auto;
+      bottom: auto;
+      align-self: start;
+      z-index: auto;
+      width: auto;
+      padding: 0 0 4rem;
+      background: none;
+      border-right: none;
+      box-shadow: none;
+      overflow: visible;
+      transform: none;
+      visibility: visible;
+    }
+    .rail a { padding: 0.4rem 0 0.4rem 0.9rem; font-size: 0.86rem; }
+    .rail-toggle, .rail-scrim { display: none; }
   }
 
   /* ---------- sections ---------- */
@@ -248,6 +341,17 @@
     line-height: 1.5;
   }
   .sec-head h2 { font-size: clamp(1.5rem, 3vw, 1.9rem); font-variation-settings: 'opsz' 40; }
+
+  .sub-head { display: flex; align-items: baseline; gap: 0.7rem; margin: 2.75rem 0 1rem; }
+  .sub-head .n {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    flex: none;
+  }
+  .sub-head h3 { font-size: 1.15rem; font-variation-settings: 'opsz' 24; }
+  .sub-head + .prose { margin-top: -0.35rem; }
 
   .prose { max-width: 42rem; color: var(--ink-soft); }
   .prose p { margin: 0 0 1rem; }
@@ -388,8 +492,13 @@
   </div>
 </header>
 
+<button type="button" class="rail-toggle" id="railToggle" aria-label="Open contents menu" aria-expanded="false" aria-controls="railNav">
+  <span class="bars" aria-hidden="true"><span></span><span></span><span></span></span>
+</button>
+<div class="rail-scrim" id="railScrim"></div>
+
 <div class="shell">
-  <nav class="rail" aria-label="Section navigation">
+  <nav class="rail" id="railNav" aria-label="Section navigation">
     <div class="rail-title">Contents</div>
     <ol>
       <li><a href="#s1"><span class="n">01</span>What this is</a></li>
@@ -398,7 +507,7 @@
       <li><a href="#s4"><span class="n">04</span>Request lifecycle</a></li>
       <li><a href="#s5"><span class="n">05</span>Data model</a></li>
       <li><a href="#s6"><span class="n">06</span>Auth &amp; permissions</a></li>
-      <li><a href="#s7"><span class="n">07</span>Boot sequence</a></li>
+      <li><a href="#s7"><span class="n">07</span>Process lifecycle</a></li>
       <li><a href="#s8"><span class="n">08</span>Load-bearing decisions</a></li>
       <li><a href="#s9"><span class="n">09</span>How it's tested</a></li>
     </ol>
@@ -744,41 +853,198 @@
     </section>
 
     <section class="doc" id="s7">
-      <div class="sec-head"><span class="sec-num">§7</span><h2>Boot sequence</h2></div>
+      <div class="sec-head"><span class="sec-num">§7</span><h2>Process lifecycle</h2></div>
       <div class="prose">
-        <p><code>cmd/api/main.go: run()</code> returns an error rather than exiting directly, so every deferred cleanup — closing the database included — still runs on the way out.</p>
+        <p>Three phases, spread across two files: <code>cmd/api/main.go</code> holds <code>main</code> and <code>run</code>, <code>cmd/api/server.go</code> holds <code>serve</code>. Startup is a straight line; shutdown is the part with an order that matters.</p>
+      </div>
+
+      <div class="sub-head"><span class="n">7.1</span><h3>Startup</h3></div>
+      <div class="prose">
+        <p><code>main()</code> does as little as possible — call <code>run()</code>, print whatever error comes back, exit. <code>run()</code> <em>returns</em> that error instead of calling <code>os.Exit</code>, because <code>os.Exit</code> skips deferred calls and this function has one that matters.</p>
       </div>
       <figure class="panel panel-scroll">
-        <svg viewBox="0 0 1160 130" role="img" aria-label="Boot sequence: parse flags, then build logger, then open SQLite via internal/db.OpenDB, then apply pending migrations via internal/db.MigrateUp, then register expvar metrics, then build the application struct, then call app.serve for a graceful HTTP shutdown." style="min-width:600px;">
+        <svg viewBox="0 0 1180 214" role="img" aria-label="Startup sequence: main calls run, which parses flags into a config struct, builds a slog JSON logger, opens SQLite with db.OpenDB and defers closing it, applies embedded migrations with db.MigrateUp, publishes expvar metrics, builds the application struct holding the WaitGroup and shutdown channel, then calls app.serve which blocks for the life of the process." style="min-width:640px;">
           <defs>
-            <marker id="ah7" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <marker id="ah7a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" class="dg-flow-fill"/>
             </marker>
           </defs>
-          <g font-size="11.5">
-            <rect x="10" y="40" width="140" height="50" rx="4" class="dg-box"/><text x="80" y="70" text-anchor="middle" class="dg-text-sub" font-size="11.5">parse flags</text>
-            <line x1="150" y1="65" x2="180" y2="65" class="dg-flow" marker-end="url(#ah7)"/>
 
-            <rect x="184" y="40" width="140" height="50" rx="4" class="dg-box"/><text x="254" y="70" text-anchor="middle" class="dg-text-sub" font-size="11.5">build logger</text>
-            <line x1="324" y1="65" x2="354" y2="65" class="dg-flow" marker-end="url(#ah7)"/>
+          <rect x="10" y="76" width="96" height="54" rx="4" class="dg-box"/>
+          <text x="58" y="100" text-anchor="middle" class="dg-text" font-size="12">main()</text>
+          <text x="58" y="116" text-anchor="middle" class="dg-text-faint" font-size="9">print err, exit 1</text>
+          <line x1="106" y1="103" x2="132" y2="103" class="dg-flow" marker-end="url(#ah7a)"/>
 
-            <rect x="358" y="40" width="150" height="50" rx="4" class="dg-box"/><text x="433" y="64" text-anchor="middle" class="dg-text-sub" font-size="11.5">open SQLite</text><text x="433" y="80" text-anchor="middle" class="dg-text-faint" font-size="9.5">db.OpenDB</text>
-            <line x1="508" y1="65" x2="538" y2="65" class="dg-flow" marker-end="url(#ah7)"/>
+          <rect x="136" y="20" width="1034" height="180" rx="6" class="dg-box-2"/>
+          <text x="152" y="42" class="dg-text" font-size="12.5">run()</text>
+          <text x="200" y="42" class="dg-text-faint" font-size="9.5">every step returns its error upward — nothing here can fail silently</text>
 
-            <rect x="542" y="40" width="160" height="50" rx="4" class="dg-box"/><text x="622" y="64" text-anchor="middle" class="dg-text-sub" font-size="11.5">apply migrations</text><text x="622" y="80" text-anchor="middle" class="dg-text-faint" font-size="9.5">db.MigrateUp</text>
-            <line x1="702" y1="65" x2="732" y2="65" class="dg-flow" marker-end="url(#ah7)"/>
+          <rect x="152" y="56" width="120" height="54" rx="4" class="dg-box"/>
+          <text x="212" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">flag.Parse()</text>
+          <text x="212" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">→ config struct</text>
+          <line x1="275" y1="83" x2="296" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
 
-            <rect x="736" y="40" width="150" height="50" rx="4" class="dg-box"/><text x="811" y="70" text-anchor="middle" class="dg-text-sub" font-size="11.5">register metrics</text>
-            <line x1="886" y1="65" x2="916" y2="65" class="dg-flow" marker-end="url(#ah7)"/>
+          <rect x="299" y="56" width="120" height="54" rx="4" class="dg-box"/>
+          <text x="359" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">slog handler</text>
+          <text x="359" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">JSON, on stdout</text>
+          <line x1="422" y1="83" x2="443" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
 
-            <rect x="920" y="40" width="120" height="50" rx="4" class="dg-box"/><text x="980" y="70" text-anchor="middle" class="dg-text-sub" font-size="11.5">build *application</text>
-            <line x1="1040" y1="65" x2="1070" y2="65" class="dg-flow" marker-end="url(#ah7)"/>
+          <rect x="446" y="56" width="120" height="54" rx="4" class="dg-box"/>
+          <text x="506" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">db.OpenDB()</text>
+          <text x="506" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">pool + DSN pragmas</text>
+          <line x1="569" y1="83" x2="590" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
 
-            <rect x="1074" y="30" width="76" height="70" rx="4" class="dg-box-accent"/><text x="1112" y="60" text-anchor="middle" class="dg-text" font-size="11.5">serve()</text><text x="1112" y="76" text-anchor="middle" class="dg-text-faint" font-size="9">graceful</text>
-          </g>
+          <rect x="593" y="56" width="120" height="54" rx="4" class="dg-box"/>
+          <text x="653" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">db.MigrateUp()</text>
+          <text x="653" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">embedded .sql</text>
+          <line x1="716" y1="83" x2="737" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
+
+          <rect x="740" y="56" width="120" height="54" rx="4" class="dg-box"/>
+          <text x="800" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">expvar.Publish</text>
+          <text x="800" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">GET /debug/vars</text>
+          <line x1="863" y1="83" x2="884" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
+
+          <rect x="887" y="56" width="120" height="54" rx="4" class="dg-box"/>
+          <text x="947" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">&amp;application{}</text>
+          <text x="947" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">wg · shutdown chan</text>
+          <line x1="1010" y1="83" x2="1031" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
+
+          <rect x="1034" y="56" width="120" height="54" rx="4" class="dg-box-accent"/>
+          <text x="1094" y="80" text-anchor="middle" class="dg-text" font-size="11.5">app.serve()</text>
+          <text x="1094" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">blocks until exit</text>
+
+          <path d="M506,116 v18 h510" class="dg-note-line"/>
+          <text x="446" y="156" class="dg-note" font-size="10.5">defer database.Close() — the whole reason run() isn't main(): os.Exit would skip it</text>
+          <text x="446" y="176" class="dg-text-faint" font-size="9.5">migrations run on every boot and no-op once the schema is current — so tests and the seed command need no extra step</text>
         </svg>
-        <figcaption>main() only ever prints the error run() returns and exits — it never fails silently.</figcaption>
+        <figcaption>Seven steps, then <code>serve()</code> blocks for the rest of the process's life.</figcaption>
       </figure>
+
+      <div class="sub-head"><span class="n">7.2</span><h3>Serving</h3></div>
+      <div class="prose">
+        <p><code>serve()</code> builds the <code>http.Server</code> — the routes as its handler, a timeout on every axis, and the app's <code>slog</code> handler wired to <code>ErrorLog</code> so the server's <em>own</em> errors come out as JSON too. Four kinds of goroutine then coexist. Note that <code>app.routes()</code> isn't purely a wiring call: building the middleware chain is what starts the rate limiter's janitor.</p>
+      </div>
+      <figure class="panel panel-scroll">
+        <svg viewBox="0 0 1000 334" role="img" aria-label="Four kinds of goroutine coexist while serving: the main goroutine blocked in ListenAndServe, the signal goroutine blocked waiting for SIGINT or SIGTERM, the rate limiter janitor sweeping stale client IPs every minute and selecting on app.shutdown, and zero or more background goroutines sending email tracked by app.wg." style="min-width:620px;">
+          <text x="10" y="22" class="dg-lane-text" font-size="10.5">WHILE SERVING</text>
+          <text x="875" y="22" text-anchor="middle" class="dg-lane-text" font-size="10.5">MECHANISM</text>
+
+          <rect x="10" y="34" width="980" height="272" rx="6" class="dg-box"/>
+          <line x1="210" y1="34" x2="210" y2="306" class="dg-line" stroke-dasharray="2 4"/>
+          <line x1="770" y1="34" x2="770" y2="306" class="dg-line" stroke-dasharray="2 4"/>
+          <line x1="10" y1="102" x2="990" y2="102" class="dg-line"/>
+          <line x1="10" y1="170" x2="990" y2="170" class="dg-line"/>
+          <line x1="10" y1="238" x2="990" y2="238" class="dg-line"/>
+
+          <text x="28" y="73" class="dg-text" font-size="12">main goroutine</text>
+          <text x="228" y="64" class="dg-text-sub" font-size="11">blocked in srv.ListenAndServe()</text>
+          <text x="228" y="82" class="dg-text-faint" font-size="9.5">unblocks with ErrServerClosed the moment Shutdown is called</text>
+          <text x="875" y="73" text-anchor="middle" class="dg-text-faint" font-size="11">—</text>
+
+          <text x="28" y="141" class="dg-text" font-size="12">signal goroutine</text>
+          <text x="228" y="132" class="dg-text-sub" font-size="11">blocked on &lt;-quit</text>
+          <text x="228" y="150" class="dg-text-faint" font-size="9.5">SIGINT (Ctrl+C) or SIGTERM (Docker, k8s, systemd) — the channel must be buffered</text>
+          <text x="875" y="141" text-anchor="middle" class="dg-text-faint" font-size="11">—</text>
+
+          <text x="28" y="209" class="dg-text" font-size="12">janitor goroutine</text>
+          <text x="228" y="196" class="dg-text-sub" font-size="11">sweeps stale client IPs once a minute</text>
+          <text x="228" y="214" class="dg-text-faint" font-size="9.5">started by rateLimit when app.routes() built the chain — not on the first request</text>
+          <rect x="790" y="184" width="170" height="24" rx="12" class="dg-pill-amber"/>
+          <text x="875" y="200" text-anchor="middle" class="dg-pill-amber-text" font-size="10.5">app.shutdown</text>
+          <text x="875" y="224" text-anchor="middle" class="dg-text-faint" font-size="9.5">tell it to STOP</text>
+
+          <text x="28" y="270" class="dg-text" font-size="12">0..n background</text>
+          <text x="28" y="286" class="dg-text" font-size="12">goroutines</text>
+          <text x="228" y="264" class="dg-text-sub" font-size="11">welcome / activation email, each with its own recover</text>
+          <text x="228" y="282" class="dg-text-faint" font-size="9.5">spawned per request by app.background() — a panic here would kill the process otherwise</text>
+          <rect x="790" y="252" width="170" height="24" rx="12" class="dg-pill-amber"/>
+          <text x="875" y="268" text-anchor="middle" class="dg-pill-amber-text" font-size="10.5">app.wg</text>
+          <text x="875" y="292" text-anchor="middle" class="dg-text-faint" font-size="9.5">wait for it to FINISH</text>
+        </svg>
+        <figcaption>Two of the four are parked. The right-hand column is the difference that matters at shutdown.</figcaption>
+      </figure>
+
+      <div class="sub-head"><span class="n">7.3</span><h3>Shutdown — the ordering is the design</h3></div>
+      <div class="prose">
+        <p>A signal arrives and the two goroutines converge on a single buffered channel. Read the two columns as independent timelines that meet where the arrows cross.</p>
+      </div>
+      <figure class="panel panel-scroll">
+        <svg viewBox="0 0 1000 660" role="img" aria-label="Graceful shutdown as two converging timelines. The signal goroutine wakes on SIGINT or SIGTERM, creates a thirty second context, calls srv.Shutdown which unblocks ListenAndServe with ErrServerClosed, then calls app.stop to close the shutdown channel, then app.wg.Wait for in-flight email, then sends nil on shutdownError. The main goroutine, blocked on that receive, then returns nil from serve, at which point run's deferred database.Close runs and the process exits." style="min-width:640px;">
+          <defs>
+            <marker id="ah7c" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" class="dg-flow-fill"/>
+            </marker>
+          </defs>
+
+          <text x="40" y="22" class="dg-lane-text" font-size="10.5">SIGNAL GOROUTINE</text>
+          <text x="700" y="22" text-anchor="middle" class="dg-lane-text" font-size="10.5">MAIN GOROUTINE</text>
+          <line x1="700" y1="34" x2="700" y2="524" class="dg-line" stroke-dasharray="2 4"/>
+          <line x1="40" y1="100" x2="40" y2="512" class="dg-line"/>
+
+          <rect x="76" y="40" width="168" height="26" rx="13" class="dg-pill-clay"/>
+          <text x="160" y="58" text-anchor="middle" class="dg-pill-clay-text" font-size="11">SIGINT / SIGTERM</text>
+          <text x="256" y="58" class="dg-text-faint" font-size="9.5">SIGKILL is deliberately absent — it cannot be caught</text>
+
+          <circle cx="40" cy="112" r="14" class="dg-num-circle"/><text x="40" y="116" text-anchor="middle" class="dg-num-text" font-size="11">1</text>
+          <text x="76" y="108" class="dg-text" font-size="12.5">s := &lt;-quit</text>
+          <text x="76" y="126" class="dg-text-sub" font-size="11">the goroutine wakes; a second Ctrl+C now does nothing — it lands in the buffer unread</text>
+
+          <circle cx="40" cy="176" r="14" class="dg-num-circle"/><text x="40" y="180" text-anchor="middle" class="dg-num-text" font-size="11">2</text>
+          <text x="76" y="172" class="dg-text" font-size="12.5">ctx, cancel := context.WithTimeout(30s)</text>
+          <text x="76" y="190" class="dg-text-sub" font-size="11">the grace period</text>
+
+          <circle cx="40" cy="240" r="14" class="dg-num-circle"/><text x="40" y="244" text-anchor="middle" class="dg-num-text" font-size="11">3</text>
+          <text x="76" y="236" class="dg-text" font-size="12.5">srv.Shutdown(ctx)</text>
+          <line x1="420" y1="232" x2="690" y2="232" class="dg-flow" marker-end="url(#ah7c)"/>
+          <text x="470" y="224" class="dg-label-flow" font-size="10.5">unblocks</text>
+          <text x="76" y="254" class="dg-text-sub" font-size="11">close listeners → close idle keep-alives → wait for active conns to go idle</text>
+          <path d="M76,266 h500" class="dg-note-line"/>
+          <text x="76" y="284" class="dg-note" font-size="10.5">the 30s deadline bounds THIS step only; if it blows, the error is sent and the rest is skipped</text>
+
+          <circle cx="40" cy="346" r="14" class="dg-num-circle"/><text x="40" y="350" text-anchor="middle" class="dg-num-text" font-size="11">4</text>
+          <text x="76" y="342" class="dg-text" font-size="12.5">app.stop()</text>
+          <text x="76" y="360" class="dg-text-sub" font-size="11">close(app.shutdown) — the janitor's select returns</text>
+          <text x="76" y="378" class="dg-text-faint" font-size="9.5">after Shutdown, so nothing still being served can depend on what this tears down</text>
+
+          <circle cx="40" cy="428" r="14" class="dg-num-circle"/><text x="40" y="432" text-anchor="middle" class="dg-num-text" font-size="11">5</text>
+          <text x="76" y="424" class="dg-text" font-size="12.5">app.wg.Wait()</text>
+          <text x="76" y="442" class="dg-text-sub" font-size="11">in-flight welcome emails land</text>
+          <path d="M76,454 h440" class="dg-note-line"/>
+          <text x="76" y="472" class="dg-note" font-size="10.5">no deadline of its own — internal/mailer's retry budget is what bounds this</text>
+
+          <circle cx="40" cy="512" r="14" class="dg-num-circle"/><text x="40" y="516" text-anchor="middle" class="dg-num-text" font-size="11">6</text>
+          <text x="76" y="508" class="dg-text" font-size="12.5">shutdownError &lt;- nil</text>
+          <line x1="340" y1="504" x2="690" y2="504" class="dg-flow" marker-end="url(#ah7c)"/>
+          <text x="390" y="496" class="dg-label-flow" font-size="10.5">completes the receive</text>
+
+          <rect x="692" y="40" width="16" height="196" rx="2" class="dg-box-accent"/>
+          <text x="722" y="62" class="dg-text" font-size="12">blocked in</text>
+          <text x="722" y="79" class="dg-text" font-size="12">srv.ListenAndServe()</text>
+
+          <text x="722" y="262" class="dg-text-sub" font-size="11">returns http.ErrServerClosed</text>
+          <text x="722" y="280" class="dg-note" font-size="10">the SUCCESS case — and it arrives</text>
+          <text x="722" y="294" class="dg-note" font-size="10">BEFORE the drain has finished</text>
+
+          <rect x="692" y="312" width="16" height="212" rx="2" class="dg-box-accent"/>
+          <text x="722" y="334" class="dg-text-sub" font-size="11">&lt;-shutdownError</text>
+          <text x="722" y="352" class="dg-text-faint" font-size="9.5">blocked here — this receive is</text>
+          <text x="722" y="366" class="dg-text-faint" font-size="9.5">what makes the shutdown graceful</text>
+
+          <line x1="700" y1="524" x2="700" y2="546" class="dg-flow" marker-end="url(#ah7c)"/>
+          <text x="722" y="556" class="dg-text" font-size="12.5">serve() returns nil</text>
+          <line x1="700" y1="566" x2="700" y2="588" class="dg-flow" marker-end="url(#ah7c)"/>
+          <text x="722" y="598" class="dg-text-sub" font-size="11">run()'s defer → database.Close()</text>
+          <line x1="700" y1="608" x2="700" y2="630" class="dg-flow" marker-end="url(#ah7c)"/>
+          <text x="722" y="640" class="dg-text" font-size="12.5">process exits</text>
+        </svg>
+        <figcaption>Without step 6's receive, <code>serve()</code> would return the instant <code>Shutdown</code> was <em>called</em> — the database would close with requests and email still in flight. <code>TestServeGracefulShutdown</code> asserts exactly that.</figcaption>
+      </figure>
+
+      <div class="callout"><strong>Why this order —</strong> <code>srv.Shutdown</code> goes first so requests drain before anything they might use is dismantled. <code>app.stop()</code> second, once nothing is being served, because killing the janitor mid-request would pull the rug from under a live handler. <code>app.wg.Wait()</code> last, because that work has no other exit condition. Reversing the last two would mean waiting forever on an endless loop, or signalling a half-sent email to stop — see <a href="#s8">§8</a>.</div>
+
+      <div class="prose" style="margin-top:1.5rem;">
+        <p><strong>Three sharp edges.</strong> The 30s grace bounds <code>srv.Shutdown</code> <em>only</em> — the <code>wg.Wait()</code> after it is unbounded. A second Ctrl+C does nothing, because registering with <code>signal.Notify</code> removed Go's default terminate-on-signal behaviour; aborting a wedged drain takes <code>SIGKILL</code>. And any error from <code>ListenAndServe</code> other than <code>ErrServerClosed</code> — a port already in use, say — returns immediately, leaving the signal goroutine parked on <code>&lt;-quit</code> forever. Harmless on the way out, but it makes <code>serve()</code> a once-per-process call.</p>
+      </div>
     </section>
 
     <section class="doc" id="s8">
@@ -883,5 +1149,33 @@
       });
     }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
     sections.forEach(function (s) { if (s) io.observe(s); });
+  })();
+
+  (function () {
+    var toggle = document.getElementById('railToggle');
+    var scrim = document.getElementById('railScrim');
+    var rail = document.getElementById('railNav');
+    var mq = window.matchMedia('(min-width: 1040px)');
+    if (!toggle || !scrim || !rail) return;
+
+    function isOpen() { return document.body.classList.contains('rail-open'); }
+
+    function open() {
+      document.body.classList.add('rail-open');
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.setAttribute('aria-label', 'Close contents menu');
+    }
+
+    function close() {
+      document.body.classList.remove('rail-open');
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.setAttribute('aria-label', 'Open contents menu');
+    }
+
+    toggle.addEventListener('click', function () { isOpen() ? close() : open(); });
+    scrim.addEventListener('click', close);
+    rail.addEventListener('click', function (e) { if (e.target.closest('a')) close(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen()) close(); });
+    mq.addEventListener('change', function (e) { if (e.matches) close(); });
   })();
 </script>
