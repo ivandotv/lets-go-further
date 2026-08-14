@@ -27,6 +27,23 @@ func TestCORS(t *testing.T) {
 		assert.Equal(t, rs.Header.Get("Access-Control-Allow-Origin"), "https://trusted.example.com")
 	})
 
+	// X-Request-Id is sent on every response, but a cross-origin browser
+	// client can only READ it if it's named in Access-Control-Expose-Headers.
+	// Drop that header and this test is the only thing that notices: the ID
+	// still appears in curl and in the tests above, and silently vanishes for
+	// the browser clients the correlation ID exists to help.
+	t.Run("trusted origin can read the request ID", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/healthcheck", nil)
+		assert.NilError(t, err)
+		req.Header.Set("Origin", "https://trusted.example.com")
+
+		rs, err := ts.Client().Do(req)
+		assert.NilError(t, err)
+		defer func() { _ = rs.Body.Close() }()
+
+		assert.StringContains(t, rs.Header.Get("Access-Control-Expose-Headers"), "X-Request-Id")
+	})
+
 	t.Run("untrusted origin gets no CORS header", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/healthcheck", nil)
 		assert.NilError(t, err)

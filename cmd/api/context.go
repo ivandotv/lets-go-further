@@ -28,6 +28,10 @@ type contextKey string
 // a key that silently doesn't match.
 const userContextKey = contextKey("user")
 
+// requestIDContextKey is the key under which the per-request correlation ID
+// (see requestID in request_id.go) is stored.
+const requestIDContextKey = contextKey("requestID")
+
 // contextSetUser returns a copy of the request with the User added to its
 // context.
 //
@@ -56,4 +60,24 @@ func (app *application) contextGetUser(r *http.Request) *data.User {
 	}
 
 	return user
+}
+
+// contextSetRequestID returns a copy of the request with the correlation ID
+// added to its context.
+func (app *application) contextSetRequestID(r *http.Request, id string) *http.Request {
+	ctx := context.WithValue(r.Context(), requestIDContextKey, id)
+	return r.WithContext(ctx)
+}
+
+// contextGetRequestID retrieves the correlation ID from the request context.
+//
+// Unlike contextGetUser, this does NOT panic when the value is missing. The
+// requestID middleware sets it on every real request, but logError and
+// logRequest are also exercised directly in tests against handlers built
+// without the full chain (see errors_test.go) — an empty string there just
+// means "nothing to correlate", which is a harmless default, not a sign the
+// chain is misconfigured.
+func (app *application) contextGetRequestID(r *http.Request) string {
+	id, _ := r.Context().Value(requestIDContextKey).(string)
+	return id
 }

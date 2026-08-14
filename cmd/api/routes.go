@@ -88,20 +88,24 @@ func (app *application) routes() http.Handler {
 	// ...into a readable left-to-right list. The order is significant, and
 	// it's outermost-first:
 	//
-	//  1. metrics        — count everything, including rejected requests
-	//  2. recoverPanic   — must be near the outside so it catches panics from
+	//  1. requestID      — assigns the correlation ID first, so every other
+	//                      middleware's log lines (including recoverPanic's)
+	//                      can include it
+	//  2. metrics        — count everything, including rejected requests
+	//  3. recoverPanic   — must be near the outside so it catches panics from
 	//                      every middleware below it
-	//  3. secureHeaders  — cheap, applies to all responses
-	//  4. enableCORS     — must run before rateLimit, so that a rejected
+	//  4. secureHeaders  — cheap, applies to all responses
+	//  5. enableCORS     — must run before rateLimit, so that a rejected
 	//                      preflight still gets CORS headers (otherwise the
 	//                      browser reports a confusing CORS error instead of
 	//                      the real 429)
-	//  5. rateLimit      — reject floods before doing any real work
-	//  6. authenticate   — identify the user for downstream handlers
-	//  7. logRequest     — innermost, so the logged status is the final one
+	//  6. rateLimit      — reject floods before doing any real work
+	//  7. authenticate   — identify the user for downstream handlers
+	//  8. logRequest     — innermost, so the logged status is the final one
 	//
 	// Then finally the router itself.
 	standard := alice.New(
+		app.requestID,
 		app.metrics,
 		app.recoverPanic,
 		app.secureHeaders,

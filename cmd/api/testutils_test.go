@@ -182,6 +182,55 @@ func newTestApplication(t *testing.T) (*application, *mockMailer) {
 	return app, mailer
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CAPTURING LOG OUTPUT
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Most tests point the logger at io.Discard (see newTestApplication). The few
+// that assert on what was LOGGED — rather than what was sent — need the two
+// helpers below.
+//
+// ── WHY THE BUFFER NEEDS A MUTEX ─────────────────────────────────────────────
+//
+// logRequest logs AFTER the handler has run, which means the server writes
+// that line on its own goroutine at a moment the client has often already
+// received the response. A plain bytes.Buffer read from the test goroutine is
+// therefore a genuine data race, and `go test -race` fails on it — not a
+// theoretical one.
+//
+// Waiting correctly is the other half: call ts.Close() before reading.
+// httptest.Server.Close blocks until every outstanding request has completed,
+// which is precisely the guarantee needed, and it's safe to call twice
+// alongside the t.Cleanup(ts.Close) that newTestServer registers.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *safeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+// newCapturingLogger returns a logger that writes JSON to w.
+//
+// JSON rather than the TextHandler used elsewhere in the suite, so a test can
+// unmarshal a line and assert on individual attributes instead of
+// substring-matching a formatted string — which would happily pass on an ID
+// that appeared in the wrong field.
+func newCapturingLogger(w io.Writer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(w, nil))
+}
+
 // testServer wraps httptest.Server with helpers that speak JSON.
 type testServer struct {
 	*httptest.Server

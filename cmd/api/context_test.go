@@ -83,3 +83,25 @@ func TestContextGetUserPanicsOnWrongType(t *testing.T) {
 
 	app.contextGetUser(r)
 }
+
+// TestContextSetAndGetRequestID is the round trip.
+func TestContextSetAndGetRequestID(t *testing.T) {
+	app := &application{}
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r = app.contextSetRequestID(r, "abc123")
+
+	assert.Equal(t, app.contextGetRequestID(r), "abc123")
+}
+
+// TestContextGetRequestIDDefaultsWhenMissing covers the deliberate difference
+// from contextGetUser: a request built without going through the requestID
+// middleware — which is how errors_test.go exercises the error helpers
+// directly — must get a harmless empty string back, not a panic.
+func TestContextGetRequestIDDefaultsWhenMissing(t *testing.T) {
+	app := &application{}
+
+	got := app.contextGetRequestID(httptest.NewRequest(http.MethodGet, "/", nil))
+
+	assert.Equal(t, got, "")
+}

@@ -25,6 +25,7 @@ func (app *application) logRequest(next http.Handler) http.Handler {
 		metrics := httpsnoop.CaptureMetrics(next, w, r)
 
 		app.logger.Info("request",
+			"request_id", app.contextGetRequestID(r),
 			"ip", realip.FromRequest(r),
 			"proto", r.Proto,
 			"method", r.Method,

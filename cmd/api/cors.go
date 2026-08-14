@@ -30,6 +30,16 @@ func (app *application) enableCORS(next http.Handler) http.Handler {
 
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 
+				// Without this, browser JavaScript cannot READ X-Request-Id.
+				// A cross-origin response only exposes a handful of
+				// safelisted headers (Content-Type, Cache-Control and a few
+				// others) to script; anything else is invisible unless it's
+				// named here — the header is still sent, the browser just
+				// hides it. Since the whole point of the ID is that a client
+				// can quote it when reporting a problem, omitting this would
+				// make the feature useless to exactly the callers it's for.
+				w.Header().Set("Access-Control-Expose-Headers", "X-Request-Id")
+
 				// ── Preflight requests ───────────────────────────────────────
 				//
 				// Before sending a "non-simple" request (anything using PUT,

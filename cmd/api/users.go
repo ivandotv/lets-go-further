@@ -86,11 +86,17 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 	// for one, so this runs in a tracked goroutine (see app.background for why
 	// that helper exists rather than a bare `go`).
 	//
-	// The closure CAPTURES token and user by reference. That's safe here
-	// because nothing else mutates them after this point — but it's exactly
-	// the kind of thing to watch for when using goroutines inside a handler,
-	// since the handler returns immediately and its variables would otherwise
-	// be reused.
+	// The closure CAPTURES token, user and requestID by reference/value.
+	// That's safe here because nothing else mutates them after this point —
+	// but it's exactly the kind of thing to watch for when using goroutines
+	// inside a handler, since the handler returns immediately and its
+	// variables would otherwise be reused.
+	//
+	// requestID is read here, on the request's own goroutine, rather than
+	// inside the closure: the request (and its context) may already be gone
+	// by the time the background goroutine runs.
+	requestID := app.contextGetRequestID(r)
+
 	app.background(func() {
 		data := map[string]any{
 			"activationToken": token.Plaintext,
@@ -101,7 +107,11 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 		if err := app.mailer.Send(user.Email, "user_welcome.tmpl", data); err != nil {
 			// We can't return an error from a background goroutine — the
 			// response has already gone out. Logging is all we can do.
-			app.logger.Error("failed to send welcome email", "error", err, "recipient", user.Email)
+			app.logger.Error("failed to send welcome email",
+				"request_id", requestID,
+				"error", err,
+				"recipient", user.Email,
+			)
 		}
 	})
 

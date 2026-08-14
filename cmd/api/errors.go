@@ -19,6 +19,7 @@ import (
 // actionable log line.
 func (app *application) logError(r *http.Request, err error) {
 	app.logger.Error(err.Error(),
+		"request_id", app.contextGetRequestID(r),
 		"method", r.Method,
 		"uri", r.URL.RequestURI(),
 	)
