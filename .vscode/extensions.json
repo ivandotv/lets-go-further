@@ -1,5 +1,15 @@
 {
     "recommendations": [
+        // Go language support: gopls, debugging, test explorer, coverage.
+        "golang.go",
+        // Surfaces mise.toml tasks in the command palette / sidebar, and points
+        // other extensions at the tool versions pinned in [tools] instead of
+        // whatever happens to be on PATH.
+        "hverlin.mise-vscode",
+        // Renders the Mermaid diagrams in README.md / ARCHITECTURE.md inside
+        // the built-in Markdown preview.
+        "bierner.markdown-mermaid",
+        // API collection for the endpoints lives in ./bruno.
         "bruno-api-client.bruno"
     ]
 }

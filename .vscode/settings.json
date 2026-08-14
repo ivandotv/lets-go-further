@@ -1,0 +1,29 @@
+{
+    // No Makefile here — tasks live in mise.toml. Stops the Makefile Tools
+    // extension prompting on every open.
+    "makefile.configureOnOpen": false,
+
+    // Match `mise run lint`, which is golangci-lint rather than plain `go vet`.
+    "go.lintTool": "golangci-lint",
+    "go.lintOnSave": "package",
+
+    // Match `mise run test`. Drop this if editor test runs feel slow — the
+    // race detector is still enforced by `mise run audit` either way.
+    "go.testFlags": [
+        "-race"
+    ],
+    // Database-backed tests migrate a fresh SQLite file each time, so the
+    // 30s default is tight when running a whole package under -race.
+    "go.testTimeout": "120s",
+
+    // mise.toml pins golangci-lint, gotestsum, govulncheck and benchstat on
+    // purpose (see the comment on [tools]). Without this, the Go extension
+    // installs its own copies into ~/go/bin and silently lints against a
+    // different version than `mise run lint` does.
+    "go.toolsManagement.autoUpdate": false,
+
+    "gopls": {
+        "ui.diagnostic.staticcheck": true,
+        "ui.completion.usePlaceholders": true
+    }
+}
