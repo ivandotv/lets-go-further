@@ -116,6 +116,9 @@ handler. The order is deliberate (see comments in `routes.go`):
   request
      │
      ▼
+  requestID        random ID → X-Request-Id header + request context, so the
+     │              client's response and every log line for it can be matched
+     ▼
   metrics          count it, start timing it
      │
      ▼

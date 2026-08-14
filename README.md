@@ -283,6 +283,8 @@ Take `GET /v1/movies/1` with a valid bearer token:
         │
         ▼
 ┌───────────────────┐
+│ requestID         │  random ID → X-Request-Id header + context
+├───────────────────┤
 │ metrics           │  count the request; start the timer
 ├───────────────────┤
 │ recoverPanic      │  turn any panic below into a clean JSON 500
@@ -312,9 +314,14 @@ Take `GET /v1/movies/1` with a valid bearer token:
    MovieModel.Get       SQL, then Genres.Scan decodes the JSON column
 ```
 
-**The middleware order is deliberate** and documented in `routes.go`. Two
+**The middleware order is deliberate** and documented in `routes.go`. Three
 orderings that matter:
 
+- `requestID` is outermost, *including* outside `recoverPanic` — so a 500 caused
+  by a panic still carries an ID the client can quote, and that ID appears in the
+  logged error too. `TestRequestIDIsSetOnRateLimitedResponses` guards this by
+  asserting the header survives a 429, which only holds if `requestID` runs
+  before `rateLimit` rejects the request.
 - `recoverPanic` sits near the outside so it catches panics from everything
   below it.
 - `enableCORS` runs *before* `rateLimit`, so that a rejected request still gets

@@ -863,61 +863,79 @@
         <p><code>main()</code> does as little as possible — call <code>run()</code>, print whatever error comes back, exit. <code>run()</code> <em>returns</em> that error instead of calling <code>os.Exit</code>, because <code>os.Exit</code> skips deferred calls and this function has one that matters.</p>
       </div>
       <figure class="panel panel-scroll">
-        <svg viewBox="0 0 1180 214" role="img" aria-label="Startup sequence: main calls run, which parses flags into a config struct, builds a slog JSON logger, opens SQLite with db.OpenDB and defers closing it, applies embedded migrations with db.MigrateUp, publishes expvar metrics, builds the application struct holding the WaitGroup and shutdown channel, then calls app.serve which blocks for the life of the process." style="min-width:640px;">
+        <svg viewBox="0 0 760 870" role="img" aria-label="Startup sequence drawn as seven numbered steps down a spine inside run(): parse flags into a config struct, build a slog JSON logger, open SQLite with db.OpenDB, apply embedded migrations with db.MigrateUp, publish expvar metrics, build the application struct holding the WaitGroup and shutdown channel, then call app.serve which blocks for the life of the process. Amber notes mark non-obvious behavior: where the deferred database close is registered and why, migration idempotency, lazy metric evaluation, and why the shutdown channel is initialized upfront rather than left nil." style="min-width:560px;">
           <defs>
             <marker id="ah7a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" class="dg-flow-fill"/>
             </marker>
           </defs>
 
-          <rect x="10" y="76" width="96" height="54" rx="4" class="dg-box"/>
-          <text x="58" y="100" text-anchor="middle" class="dg-text" font-size="12">main()</text>
-          <text x="58" y="116" text-anchor="middle" class="dg-text-faint" font-size="9">print err, exit 1</text>
-          <line x1="106" y1="103" x2="132" y2="103" class="dg-flow" marker-end="url(#ah7a)"/>
+          <rect x="190" y="8" width="140" height="48" rx="4" class="dg-box"/>
+          <text x="260" y="29" text-anchor="middle" class="dg-text" font-size="12">main()</text>
+          <text x="260" y="45" text-anchor="middle" class="dg-text-faint" font-size="9">print err, exit 1</text>
+          <line x1="260" y1="56" x2="260" y2="93" class="dg-flow" marker-end="url(#ah7a)"/>
 
-          <rect x="136" y="20" width="1034" height="180" rx="6" class="dg-box-2"/>
-          <text x="152" y="42" class="dg-text" font-size="12.5">run()</text>
-          <text x="200" y="42" class="dg-text-faint" font-size="9.5">every step returns its error upward — nothing here can fail silently</text>
+          <rect x="40" y="76" width="680" height="766" rx="6" class="dg-box-2"/>
+          <text x="64" y="98" class="dg-text" font-size="12.5">run()</text>
+          <text x="118" y="98" class="dg-text-faint" font-size="9.5">every step returns its error upward — nothing here can fail silently</text>
 
-          <rect x="152" y="56" width="120" height="54" rx="4" class="dg-box"/>
-          <text x="212" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">flag.Parse()</text>
-          <text x="212" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">→ config struct</text>
-          <line x1="275" y1="83" x2="296" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
+          <!-- spine -->
+          <line x1="260" y1="109" x2="260" y2="757" class="dg-line" stroke-dasharray="2 4"/>
 
-          <rect x="299" y="56" width="120" height="54" rx="4" class="dg-box"/>
-          <text x="359" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">slog handler</text>
-          <text x="359" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">JSON, on stdout</text>
-          <line x1="422" y1="83" x2="443" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
+          <!-- 1 flag.Parse -->
+          <circle cx="260" cy="126" r="15" class="dg-num-circle"/><text x="260" y="130" text-anchor="middle" class="dg-num-text" font-size="12">1</text>
+          <text x="300" y="122" class="dg-text" font-size="14.5">flag.Parse()</text>
+          <text x="300" y="140" class="dg-text-sub" font-size="11.5">→ config struct: port, env, db, limiter, smtp, cors</text>
+          <line x1="260" y1="142" x2="260" y2="188" class="dg-flow" marker-end="url(#ah7a)"/>
 
-          <rect x="446" y="56" width="120" height="54" rx="4" class="dg-box"/>
-          <text x="506" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">db.OpenDB()</text>
-          <text x="506" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">pool + DSN pragmas</text>
-          <line x1="569" y1="83" x2="590" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
+          <!-- 2 slog -->
+          <circle cx="260" cy="204" r="15" class="dg-num-circle"/><text x="260" y="208" text-anchor="middle" class="dg-num-text" font-size="12">2</text>
+          <text x="300" y="200" class="dg-text" font-size="14.5">slog.NewJSONHandler</text>
+          <text x="300" y="218" class="dg-text-sub" font-size="11.5">structured JSON logger, written to stdout</text>
+          <line x1="260" y1="220" x2="260" y2="265" class="dg-flow" marker-end="url(#ah7a)"/>
 
-          <rect x="593" y="56" width="120" height="54" rx="4" class="dg-box"/>
-          <text x="653" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">db.MigrateUp()</text>
-          <text x="653" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">embedded .sql</text>
-          <line x1="716" y1="83" x2="737" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
+          <!-- 3 db.OpenDB -->
+          <circle cx="260" cy="282" r="15" class="dg-num-circle"/><text x="260" y="286" text-anchor="middle" class="dg-num-text" font-size="12">3</text>
+          <text x="300" y="278" class="dg-text" font-size="14.5">db.OpenDB()</text>
+          <text x="300" y="296" class="dg-text-sub" font-size="11.5">opens the SQLite file, applies pool limits</text>
+          <path d="M300,308 h380" class="dg-note-line"/>
+          <text x="300" y="324" class="dg-note" font-size="11">DSN carries WAL, busy_timeout, foreign_keys pragmas</text>
+          <text x="300" y="340" class="dg-text-faint" font-size="9.5">why run() exists apart from main(): os.Exit skips deferred calls</text>
+          <line x1="260" y1="342" x2="260" y2="397" class="dg-flow" marker-end="url(#ah7a)"/>
 
-          <rect x="740" y="56" width="120" height="54" rx="4" class="dg-box"/>
-          <text x="800" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">expvar.Publish</text>
-          <text x="800" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">GET /debug/vars</text>
-          <line x1="863" y1="83" x2="884" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
+          <!-- 4 db.MigrateUp -->
+          <circle cx="260" cy="414" r="15" class="dg-num-circle"/><text x="260" y="418" text-anchor="middle" class="dg-num-text" font-size="12">4</text>
+          <text x="300" y="410" class="dg-text" font-size="14.5">db.MigrateUp()</text>
+          <text x="300" y="428" class="dg-text-sub" font-size="11.5">applies pending embedded .sql migrations</text>
+          <path d="M300,440 h380" class="dg-note-line"/>
+          <text x="300" y="456" class="dg-note" font-size="11">safe on every boot — a no-op once the schema is current</text>
+          <line x1="260" y1="458" x2="260" y2="511" class="dg-flow" marker-end="url(#ah7a)"/>
 
-          <rect x="887" y="56" width="120" height="54" rx="4" class="dg-box"/>
-          <text x="947" y="80" text-anchor="middle" class="dg-text-sub" font-size="11">&amp;application{}</text>
-          <text x="947" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">wg · shutdown chan</text>
-          <line x1="1010" y1="83" x2="1031" y2="83" class="dg-flow" marker-end="url(#ah7a)"/>
+          <!-- 5 expvar -->
+          <circle cx="260" cy="528" r="15" class="dg-num-circle"/><text x="260" y="532" text-anchor="middle" class="dg-num-text" font-size="12">5</text>
+          <text x="300" y="524" class="dg-text" font-size="14.5">expvar.Publish ×4</text>
+          <text x="300" y="542" class="dg-text-sub" font-size="11.5">version, goroutines, database pool stats, timestamp</text>
+          <path d="M300,554 h380" class="dg-note-line"/>
+          <text x="300" y="570" class="dg-note" font-size="11">evaluated lazily, only when GET /debug/vars is scraped</text>
+          <line x1="260" y1="572" x2="260" y2="625" class="dg-flow" marker-end="url(#ah7a)"/>
 
-          <rect x="1034" y="56" width="120" height="54" rx="4" class="dg-box-accent"/>
-          <text x="1094" y="80" text-anchor="middle" class="dg-text" font-size="11.5">app.serve()</text>
-          <text x="1094" y="96" text-anchor="middle" class="dg-text-faint" font-size="9">blocks until exit</text>
+          <!-- 6 application struct -->
+          <circle cx="260" cy="642" r="15" class="dg-num-circle"/><text x="260" y="646" text-anchor="middle" class="dg-num-text" font-size="12">6</text>
+          <text x="300" y="638" class="dg-text" font-size="14.5">&amp;application{}</text>
+          <text x="300" y="656" class="dg-text-sub" font-size="11.5">config, logger, models, mailer, wg, shutdown chan</text>
+          <path d="M300,668 h380" class="dg-note-line"/>
+          <text x="300" y="684" class="dg-note" font-size="11">shutdown chan initialized here, not left nil</text>
+          <text x="300" y="700" class="dg-text-faint" font-size="9.5">so the janitor app.routes() starts later can actually be told to stop</text>
+          <line x1="260" y1="702" x2="260" y2="756" class="dg-flow" marker-end="url(#ah7a)"/>
 
-          <path d="M506,116 v18 h510" class="dg-note-line"/>
-          <text x="446" y="156" class="dg-note" font-size="10.5">defer database.Close() — the whole reason run() isn't main(): os.Exit would skip it</text>
-          <text x="446" y="176" class="dg-text-faint" font-size="9.5">migrations run on every boot and no-op once the schema is current — so tests and the seed command need no extra step</text>
+          <!-- 7 app.serve -->
+          <rect x="286" y="746" width="420" height="60" rx="6" class="dg-box-accent"/>
+          <circle cx="260" cy="774" r="15" class="dg-num-circle"/><text x="260" y="778" text-anchor="middle" class="dg-num-text" font-size="12">7</text>
+          <text x="300" y="770" class="dg-text" font-size="14.5">app.serve()</text>
+          <text x="300" y="788" class="dg-text-sub" font-size="11.5">blocks here for the rest of the process's life</text>
+          <text x="300" y="820" class="dg-text-faint" font-size="10" font-style="italic">↓ continues in §7.2 Serving</text>
         </svg>
-        <figcaption>Seven steps, then <code>serve()</code> blocks for the rest of the process's life.</figcaption>
+        <figcaption>Seven numbered steps inside <code>run()</code> — the same spine as the request lifecycle in <a href="#s4">§4</a>. Any step's error returns straight to <code>main()</code>, which prints it and exits 1.</figcaption>
       </figure>
 
       <div class="sub-head"><span class="n">7.2</span><h3>Serving</h3></div>
