@@ -34,7 +34,7 @@ architecture and every place where SQLite forced a change from the book.
 
 ## Quickstart
 
-You need **Go 1.22+** and nothing else. No database server, no Docker, no C
+You need **Go 1.26+** and nothing else. No database server, no Docker, no C
 compiler.
 
 ```bash
@@ -145,10 +145,10 @@ Three things worth knowing:
 - **Variables are environment variables**, where the Makefile used `make x
 y=z`. Each has a default in `[vars]`:
 
-                ```bash
-                db_dsn=/tmp/other.db mise run run/api
-                fuzztime=10s mise run test/fuzz
-                ```
+                        ```bash
+                        db_dsn=/tmp/other.db mise run run/api
+                        fuzztime=10s mise run test/fuzz
+                        ```
 
 - **Arguments are positional and validated.** `db/migrations/new` takes the
   migration name as a real argument, so `mise run db/migrations/new` with no
