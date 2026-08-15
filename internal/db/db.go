@@ -164,10 +164,14 @@ func MigrateUp(database *sql.DB) error {
 		return fmt.Errorf("db: creating migrator: %w", err)
 	}
 
-	// NOTE: we deliberately do NOT call m.Close() here. Because we handed
-	// migrate an existing *sql.DB, Close() would close the connection pool out
-	// from under the application. We close the source ourselves (deferred
-	// above) and let the caller own the pool's lifetime.
+	// NOTE: we deliberately do NOT call m.Close() here. It closes BOTH
+	// halves m was built from — source and database driver (see its
+	// godoc: "Close closes the source and the database"). Our driver
+	// wraps the caller's *existing* *sql.DB pool rather than a
+	// connection of its own, so calling m.Close() would close that pool
+	// out from under the rest of the application. We close only the
+	// source ourselves (deferred above); the pool stays open, owned by
+	// whoever opened it.
 
 	err = m.Up()
 	// ErrNoChange just means "already at the latest version", which is the
