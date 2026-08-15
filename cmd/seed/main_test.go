@@ -235,6 +235,32 @@ func TestParseFlags(t *testing.T) {
 			t.Fatal("got nil error for an unknown flag; want a parse failure")
 		}
 	})
+
+	// The prefix is shared with cmd/api deliberately: setting GREENLIGHT_DB_DSN
+	// once (in .env, or in a container's environment) has to point both
+	// commands at the same file, or `run/seed` would helpfully seed a database
+	// the API never opens.
+	t.Run("falls back to the environment", func(t *testing.T) {
+		t.Setenv("GREENLIGHT_DB_DSN", "/tmp/from-env.db")
+		t.Setenv("GREENLIGHT_EMAIL", "env@example.com")
+
+		cfg, err := parseFlags(nil)
+		assert.NilError(t, err)
+
+		assert.Equal(t, cfg.dsn, "/tmp/from-env.db")
+		assert.Equal(t, cfg.email, "env@example.com")
+		// Untouched by the environment, so still the default.
+		assert.Equal(t, cfg.fixedToken, "GREENLIGHT0000000000000000")
+	})
+
+	t.Run("flag beats the environment", func(t *testing.T) {
+		t.Setenv("GREENLIGHT_DB_DSN", "/tmp/from-env.db")
+
+		cfg, err := parseFlags([]string{"-db-dsn", "/tmp/from-flag.db"})
+		assert.NilError(t, err)
+
+		assert.Equal(t, cfg.dsn, "/tmp/from-flag.db")
+	})
 }
 
 // testConfig returns a config pointing at a fresh database in a temp directory.

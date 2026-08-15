@@ -17,7 +17,10 @@
 #
 #   {{ vars.x }}     a variable from the [vars] table below. Each one falls back
 #                    to an environment variable, so they can be overridden per
-#                    run: `db_dsn=/tmp/other.db mise run run/api`.
+#                    run: `fuzztime=10s mise run test/fuzz`.
+#
+#   [env]            environment for every task, loaded from .env — this is how
+#                    the application itself is configured. See the block below.
 #
 # `mise tasks` lists everything with descriptions — no hand-written help target
 # is needed, which is why the Makefile's `help` target has no equivalent here.
@@ -46,10 +49,28 @@ gotestsum = "1.13.0"
 # every run, since a freshly-computed pseudo-version always looks brand new.
 "go:golang.org/x/perf/cmd/benchstat" = "0.0.0-20260813145340-fd4a688df892"
 
-[vars]
-# The database file. Override with: db_dsn=/tmp/other.db mise run run/api
-db_dsn = "{{ env.db_dsn | default(value='greenlight.db') }}"
+[env]
+# Local development configuration — including SMTP credentials — lives in .env,
+# which is gitignored. mise loads it into the environment of every task, which
+# is how `mise run run/api` picks up settings that are written down nowhere in
+# this file. Copy .env.example to .env to get started; a missing .env is fine
+# and simply leaves every setting at its default.
+#
+# Nothing in the Go code knows about .env, or about mise. The binaries read
+# plain environment variables (see internal/envflag), so in Docker or Kubernetes
+# the same variables arrive from `env_file:` or a Secret instead, and the
+# application is unchanged.
+#
+# Two behaviours worth knowing, both verified rather than assumed:
+#
+#   - .env takes precedence over the surrounding shell environment. Exporting
+#     GREENLIGHT_DB_DSN in your shell will NOT override a value set in .env.
+#   - .env is loaded too late to be visible to [vars] templating below, which
+#     mise renders from the process environment. That's why the database tasks
+#     expand ${GREENLIGHT_DB_DSN} in the shell rather than through a var.
+_.file = ".env"
 
+[vars]
 # Where the migration .sql files live.
 migrations_path = "{{ env.migrations_path | default(value='./migrations') }}"
 
@@ -73,15 +94,23 @@ linker_flags = "-s -w"
 description = "run the API server"
 # Migrations run automatically on startup, so this works against an empty
 # directory with no setup at all.
-run = "go run ./cmd/api -db-dsn={{ vars.db_dsn }}"
+#
+# No -db-dsn flag here on purpose: the binary reads GREENLIGHT_DB_DSN itself, so
+# .env drives it. Passing the flag would OUTRANK the environment (flag > env >
+# default) and silently ignore whatever .env said — the least debuggable
+# failure mode this design has.
+run = "go run ./cmd/api"
 
 [tasks."run/seed"]
 description = "create a demo user with sample data and print an auth token"
-run = "go run ./cmd/seed -db-dsn={{ vars.db_dsn }}"
+run = "go run ./cmd/seed"
 
 [tasks."db/shell"]
 description = "open a sqlite3 shell against the database"
-run = "sqlite3 {{ vars.db_dsn }}"
+# The sqlite3 CLI has no idea about GREENLIGHT_DB_DSN, so the default is
+# repeated here in shell syntax. It's expanded by the shell at run time, not by
+# mise at template time, which is what lets it see the value from .env.
+run = 'sqlite3 "${GREENLIGHT_DB_DSN:-greenlight.db}"'
 
 [tasks."db/migrations/new"]
 description = "create a new pair of migration files"
@@ -107,25 +136,28 @@ description = "apply all up migrations manually"
 # here for when you want to migrate without running the server.
 run = [
     "echo 'Running up migrations...'",
-    'migrate -path={{ vars.migrations_path }} -database="sqlite://{{ vars.db_dsn }}" up',
+    'migrate -path={{ vars.migrations_path }} -database="sqlite://${GREENLIGHT_DB_DSN:-greenlight.db}" up',
 ]
 
 [tasks."db/migrations/down"]
 description = "roll back all migrations"
 confirm = "Are you sure? This rolls back every migration."
-run = 'migrate -path={{ vars.migrations_path }} -database="sqlite://{{ vars.db_dsn }}" down'
+run = 'migrate -path={{ vars.migrations_path }} -database="sqlite://${GREENLIGHT_DB_DSN:-greenlight.db}" down'
 
 [tasks."db/migrations/version"]
 description = "print the current migration version"
-run = 'migrate -path={{ vars.migrations_path }} -database="sqlite://{{ vars.db_dsn }}" version'
+run = 'migrate -path={{ vars.migrations_path }} -database="sqlite://${GREENLIGHT_DB_DSN:-greenlight.db}" version'
 
 [tasks."db/reset"]
 description = "delete the database file and start over"
 confirm = "Are you sure? This deletes the database file."
-run = [
-    "rm -f {{ vars.db_dsn }} {{ vars.db_dsn }}-wal {{ vars.db_dsn }}-shm",
-    "echo 'Database removed. It will be recreated and migrated on next run.'",
-]
+# A shell block rather than a list, so the path is named once instead of six
+# times across the rm and its -wal/-shm siblings.
+run = '''
+db="${GREENLIGHT_DB_DSN:-greenlight.db}"
+rm -f "$db" "$db-wal" "$db-shm"
+echo "Database removed. It will be recreated and migrated on next run."
+'''
 
 # ==================================================================================== #
 # QUALITY CONTROL

@@ -22,8 +22,13 @@ import (
 
 	"greenlight/internal/data"
 	"greenlight/internal/db"
+	"greenlight/internal/envflag"
 	"greenlight/internal/validator"
 )
+
+// envPrefix matches cmd/api's, so shared settings (notably -db-dsn) can be set
+// once in the environment and picked up by both commands.
+const envPrefix = "GREENLIGHT_"
 
 // config holds everything the seeder needs, so that run() takes plain values
 // rather than reading global flag state.
@@ -51,11 +56,15 @@ func main() {
 	}
 }
 
-// parseFlags builds a config from command-line arguments.
+// parseFlags builds a config from command-line arguments, falling back to
+// environment variables for anything not given (see internal/envflag).
 //
 // It uses its own FlagSet rather than the package-level one, with
 // ContinueOnError so a bad argument returns instead of calling os.Exit — which
 // would take a test binary down with it.
+//
+// The prefix matches cmd/api's, so GREENLIGHT_DB_DSN points both commands at
+// the same database — which is the whole point of setting it once in .env.
 func parseFlags(args []string) (config, error) {
 	var cfg config
 
@@ -78,7 +87,13 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&cfg.fixedToken, "token", "GREENLIGHT0000000000000000",
 		"Fixed plaintext authentication token to seed for the demo user (must be 26 characters)")
 
+	fs.Usage = envflag.Usage(fs, envPrefix)
+
 	if err := fs.Parse(args); err != nil {
+		return config{}, err
+	}
+
+	if err := envflag.Apply(fs, envPrefix); err != nil {
 		return config{}, err
 	}
 

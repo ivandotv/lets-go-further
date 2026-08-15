@@ -13,6 +13,95 @@ import (
 	"greenlight/internal/mailer"
 )
 
+// TestParseConfigDefaults checks that the zero-argument case still produces a
+// runnable configuration — the property that lets `go run ./cmd/api` work in a
+// fresh clone with no setup.
+func TestParseConfigDefaults(t *testing.T) {
+	cfg, showVersion, err := parseConfig(nil)
+	assert.NilError(t, err)
+
+	assert.Equal(t, showVersion, false)
+	assert.Equal(t, cfg.port, 4000)
+	assert.Equal(t, cfg.env, "development")
+	assert.Equal(t, cfg.db.dsn, "greenlight.db")
+	assert.Equal(t, cfg.limiter.enabled, true)
+}
+
+// TestParseConfigReadsEnvironment is the end-to-end version of the envflag
+// tests: it proves the wiring in parseConfig actually reaches the real flags,
+// including the SMTP password that motivated the whole change.
+func TestParseConfigReadsEnvironment(t *testing.T) {
+	t.Setenv("GREENLIGHT_PORT", "8080")
+	t.Setenv("GREENLIGHT_ENV", "production")
+	t.Setenv("GREENLIGHT_SMTP_PASSWORD", "s3cret")
+	t.Setenv("GREENLIGHT_CORS_TRUSTED_ORIGINS", "https://a.example.com https://b.example.com")
+
+	cfg, _, err := parseConfig(nil)
+	assert.NilError(t, err)
+
+	assert.Equal(t, cfg.port, 8080)
+	assert.Equal(t, cfg.env, "production")
+	assert.Equal(t, cfg.smtp.password, "s3cret")
+	assert.DeepEqual(t, cfg.cors.trustedOrigins, []string{"https://a.example.com", "https://b.example.com"})
+}
+
+// TestParseConfigFlagBeatsEnvironment pins the precedence rule at the level
+// people actually rely on it — overriding one setting for a single local run
+// while .env supplies the rest.
+func TestParseConfigFlagBeatsEnvironment(t *testing.T) {
+	t.Setenv("GREENLIGHT_PORT", "8080")
+	t.Setenv("GREENLIGHT_DB_DSN", "/tmp/from-env.db")
+
+	cfg, _, err := parseConfig([]string{"-port=4001"})
+	assert.NilError(t, err)
+
+	assert.Equal(t, cfg.port, 4001)
+	assert.Equal(t, cfg.db.dsn, "/tmp/from-env.db")
+}
+
+// TestParseConfigIgnoresVersionEnv covers the deliberate exclusion.
+//
+// GREENLIGHT_VERSION is a plausible thing for a deployment to set for its own
+// reasons; mapping it onto the -version bool would fail to parse and stop the
+// server booting. It must be inert.
+func TestParseConfigIgnoresVersionEnv(t *testing.T) {
+	t.Setenv("GREENLIGHT_VERSION", "1.2.3")
+
+	_, showVersion, err := parseConfig(nil)
+	assert.NilError(t, err)
+	assert.Equal(t, showVersion, false)
+}
+
+// TestParseConfigVersionFlag checks the flag itself still works.
+func TestParseConfigVersionFlag(t *testing.T) {
+	_, showVersion, err := parseConfig([]string{"-version"})
+	assert.NilError(t, err)
+	assert.Equal(t, showVersion, true)
+}
+
+// TestRunHelpExitsCleanly checks that `api -help` is treated as success.
+//
+// With ContinueOnError, fs.Parse returns flag.ErrHelp for -help. If run()
+// passed that straight up, main would print "fatal: flag: help requested" and
+// exit 1 — for what is a completely normal thing to type.
+func TestRunHelpExitsCleanly(t *testing.T) {
+	assert.NilError(t, run([]string{"-help"}))
+}
+
+// TestRunRejectsBadEnvironment checks that a malformed environment value stops
+// the server at boot with a message naming the variable, rather than silently
+// running on the default.
+func TestRunRejectsBadEnvironment(t *testing.T) {
+	t.Setenv("GREENLIGHT_PORT", "not-a-number")
+
+	err := run(nil)
+	if err == nil {
+		t.Fatal("got nil error with an unparseable GREENLIGHT_PORT; want a failure")
+	}
+
+	assert.StringContains(t, err.Error(), "GREENLIGHT_PORT")
+}
+
 // TestNewMailerFallsBackToLogging covers the "no SMTP configured" branch.
 //
 // This is the deviation from the book that lets a fresh clone register a user

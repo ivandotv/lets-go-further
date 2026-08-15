@@ -13,6 +13,7 @@
 package main
 
 import (
+	"errors"
 	"expvar"
 	"flag"
 	"fmt"
@@ -26,8 +27,14 @@ import (
 
 	"greenlight/internal/data"
 	"greenlight/internal/db"
+	"greenlight/internal/envflag"
 	"greenlight/internal/mailer"
 )
+
+// envPrefix is prepended to every flag name to derive the environment variable
+// that backs it — see internal/envflag. -smtp-password reads
+// GREENLIGHT_SMTP_PASSWORD.
+const envPrefix = "GREENLIGHT_"
 
 // version is reported by the healthcheck endpoint and the -version flag.
 //
@@ -36,7 +43,8 @@ import (
 var version = vcsRevision()
 
 // config holds every setting the application needs, all of it sourced from
-// command-line flags.
+// command-line flags — or, for any flag not given, from the environment
+// variable that backs it (see internal/envflag).
 //
 // Keeping configuration in one struct (rather than reading globals or the
 // environment from scattered places) means there's exactly one place to look
@@ -146,7 +154,7 @@ func main() {
 	// main() does as little as possible: parse flags, then hand off. Everything
 	// that can fail lives in run(), which returns an error rather than calling
 	// os.Exit — that way deferred cleanup actually runs.
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		// The logger may not exist yet if setup failed early, so write to
 		// stderr directly.
 		fmt.Fprintf(os.Stderr, "fatal: %s\n", err)
@@ -154,49 +162,95 @@ func main() {
 	}
 }
 
-func run() error {
+// parseConfig builds a config from command-line arguments, falling back to
+// environment variables for anything not given (see internal/envflag).
+//
+// It uses its own FlagSet rather than the package-level one, for the same
+// reason cmd/seed does: flag.CommandLine can only be parsed once per process,
+// so a run() that used it could never be exercised twice from a test binary.
+// ContinueOnError makes a bad argument return an error instead of calling
+// os.Exit, which would take that test binary down with it.
+//
+// The second return value reports whether -version was requested.
+func parseConfig(args []string) (config, bool, error) {
 	var cfg config
+
+	fs := flag.NewFlagSet("api", flag.ContinueOnError)
 
 	// ── Flags ────────────────────────────────────────────────────────────────
 	//
 	// Every flag has a sensible default so `go run ./cmd/api` works with no
 	// arguments at all.
 
-	flag.IntVar(&cfg.port, "port", 4000, "API server port")
-	flag.StringVar(&cfg.env, "env", "development", "Environment (development|staging|production)")
+	fs.IntVar(&cfg.port, "port", 4000, "API server port")
+	fs.StringVar(&cfg.env, "env", "development", "Environment (development|staging|production)")
 
 	// The DSN is just a file path for SQLite. The connection options (WAL,
 	// busy timeout, foreign keys) are added by internal/db.
-	flag.StringVar(&cfg.db.dsn, "db-dsn", "greenlight.db", "SQLite database file path")
+	fs.StringVar(&cfg.db.dsn, "db-dsn", "greenlight.db", "SQLite database file path")
 
 	// See the long comment in internal/db.OpenDB for why these defaults are so
 	// much smaller than the book's Postgres values.
-	flag.IntVar(&cfg.db.maxOpenConns, "db-max-open-conns", 4, "SQLite max open connections")
-	flag.IntVar(&cfg.db.maxIdleConns, "db-max-idle-conns", 4, "SQLite max idle connections")
-	flag.DurationVar(&cfg.db.maxIdleTime, "db-max-idle-time", 15*time.Minute, "SQLite max connection idle time")
+	fs.IntVar(&cfg.db.maxOpenConns, "db-max-open-conns", 4, "SQLite max open connections")
+	fs.IntVar(&cfg.db.maxIdleConns, "db-max-idle-conns", 4, "SQLite max idle connections")
+	fs.DurationVar(&cfg.db.maxIdleTime, "db-max-idle-time", 15*time.Minute, "SQLite max connection idle time")
 
-	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 2, "Rate limiter maximum requests per second")
-	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate limiter maximum burst")
-	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
+	fs.Float64Var(&cfg.limiter.rps, "limiter-rps", 2, "Rate limiter maximum requests per second")
+	fs.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate limiter maximum burst")
+	fs.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
 
-	flag.StringVar(&cfg.smtp.host, "smtp-host", "", "SMTP host (empty = log emails instead of sending)")
-	flag.IntVar(&cfg.smtp.port, "smtp-port", 25, "SMTP port")
-	flag.StringVar(&cfg.smtp.username, "smtp-username", "", "SMTP username")
-	flag.StringVar(&cfg.smtp.password, "smtp-password", "", "SMTP password")
-	flag.StringVar(&cfg.smtp.sender, "smtp-sender", "Greenlight <no-reply@greenlight.example.com>", "SMTP sender")
+	fs.StringVar(&cfg.smtp.host, "smtp-host", "", "SMTP host (empty = log emails instead of sending)")
+	fs.IntVar(&cfg.smtp.port, "smtp-port", 25, "SMTP port")
+	fs.StringVar(&cfg.smtp.username, "smtp-username", "", "SMTP username")
+	// Prefer GREENLIGHT_SMTP_PASSWORD over this flag anywhere real: command-line
+	// arguments are world-readable in `ps aux`, environment is not.
+	fs.StringVar(&cfg.smtp.password, "smtp-password", "", "SMTP password")
+	fs.StringVar(&cfg.smtp.sender, "smtp-sender", "Greenlight <no-reply@greenlight.example.com>", "SMTP sender")
 
-	// flag.Func runs a callback when the flag is parsed, which lets us accept
-	// a space-separated list and split it into a slice.
-	flag.Func("cors-trusted-origins", "Space separated list of trusted CORS origins", func(val string) error {
+	// fs.Func runs a callback when the flag is parsed, which lets us accept
+	// a space-separated list and split it into a slice. envflag.Apply goes
+	// through the same callback, so GREENLIGHT_CORS_TRUSTED_ORIGINS is split
+	// identically.
+	fs.Func("cors-trusted-origins", "Space separated list of trusted CORS origins", func(val string) error {
 		cfg.cors.trustedOrigins = strings.Fields(val)
 		return nil
 	})
 
-	displayVersion := flag.Bool("version", false, "Display version and exit")
+	displayVersion := fs.Bool("version", false, "Display version and exit")
 
-	flag.Parse()
+	// Replaces the default usage message with one that also names each flag's
+	// environment variable, so `-help` documents both ways of setting it.
+	fs.Usage = envflag.Usage(fs, envPrefix, "version")
 
-	if *displayVersion {
+	if err := fs.Parse(args); err != nil {
+		return config{}, false, err
+	}
+
+	// Anything not given on the command line falls back to the environment.
+	// -version is excluded: it's a one-shot action rather than a setting, and
+	// GREENLIGHT_VERSION is a plausible variable for a deployment to set for
+	// unrelated reasons, which would fail to parse as a bool and stop the
+	// server from booting.
+	if err := envflag.Apply(fs, envPrefix, "version"); err != nil {
+		return config{}, false, err
+	}
+
+	return cfg, *displayVersion, nil
+}
+
+func run(args []string) error {
+	cfg, showVersion, err := parseConfig(args)
+	if err != nil {
+		// A bare -help isn't a failure: the flag package has already printed
+		// the usage message, so there's nothing left to do or report.
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+
+		return err
+	}
+
+	if showVersion {
 		fmt.Printf("Version:\t%s\n", version)
 		return nil
 	}

@@ -68,9 +68,10 @@ of `mise.toml` and run directly.)
 
 Four differences from the old Makefile, worth remembering when editing tasks:
 
-- **Variables are env vars, not `make x y=z`**: `db_dsn=/tmp/other.db mise run
-  run/api`, `fuzztime=10s mise run test/fuzz`. Defaults live in `[vars]`, each
-  written as `{{ env.x | default(value='...') }}`.
+- **Variables are env vars, not `make x y=z`**: `fuzztime=10s mise run
+  test/fuzz`. Defaults live in `[vars]`, each written as
+  `{{ env.x | default(value='...') }}`. Application settings do NOT go through
+  `[vars]` — see the configuration section below.
 - **`db/migrations/new` takes a positional arg**, not `name=`. mise refuses to
   run it without one.
 - **`db/reset` and `db/migrations/down` use `confirm`**, which needs a real
@@ -89,8 +90,9 @@ migrations/     Versioned .sql schema, embedded via go:embed and applied automat
 ```
 
 Supporting packages: `internal/validator` (field-error map), `internal/mailer`
-(SMTP + embedded templates), `internal/testutil` (fresh migrated test DB per
-test), `internal/assert` (test assertion helpers).
+(SMTP + embedded templates), `internal/envflag` (flags fall back to env vars),
+`internal/testutil` (fresh migrated test DB per test), `internal/assert` (test
+assertion helpers).
 
 Every handler/middleware is a method on `*application` (`cmd/api/main.go`) —
 there are no global variables, which is what lets each test build a fully
@@ -127,9 +129,9 @@ greenlight/internal/testutil`) before adding tests; don't re-derive it here.
   `assert.DeepEqual` for slices/maps/structs that `assert.Equal`'s `comparable`
   constraint can't take. Don't add testify — `internal/assert/assert.go`
   documents why this project hand-rolls its helpers instead.
-- Coverage baseline: `internal/validator` 100%, `internal/mailer` 93%,
-  `internal/data` 91%, `internal/db` 84%, `cmd/api` 81%, `cmd/seed` 73%; **84%
-  module-wide**. The rest is mostly `main`/`run` process wiring. Note
+- Coverage baseline: `internal/validator` 100%, `internal/envflag` 100%,
+  `internal/mailer` 93%, `internal/data` 91%, `cmd/api` 86%, `internal/db` 85%,
+  `cmd/seed` 73%; **87% module-wide**. The rest is mostly `main`/`run` process wiring. Note
   `mise run test/cover` uses `-coverpkg=./...` — without it `internal/db` reads 0%,
   because it's exercised through `internal/testutil` from other packages.
 - Beyond example-based tests there are **4 fuzz targets** (`Runtime.UnmarshalJSON`,
@@ -146,6 +148,31 @@ greenlight/internal/testutil`) before adding tests; don't re-derive it here.
   in tests stay valid. Don't reintroduce a `for { time.Sleep(...) }` loop with
   no exit — `TestRateLimitJanitorExitsOnShutdown` fails the whole binary if you
   do, and it would block any future use of synctest in this package.
+
+## Configuration
+
+Every setting is a flag with an environment variable behind it. Precedence is
+**flag > env > default**; the env name is the flag upper-cased with dashes
+turned to underscores and a `GREENLIGHT_` prefix (`-smtp-password` →
+`GREENLIGHT_SMTP_PASSWORD`). `internal/envflag` implements this in one
+`fs.Visit` loop and adds no dependency — don't replace it with viper/kong.
+
+- `go run ./cmd/api -help` is the generated reference for every setting; it
+  can't drift, so don't duplicate the list into docs.
+- Both `cmd/api` and `cmd/seed` build their **own** `flag.FlagSet` (not
+  `flag.CommandLine`, which parses once per process and would make `run()`
+  untestable). `cmd/api`'s lives in `parseConfig`.
+- `-version` is excluded from the env mapping on purpose: `GREENLIGHT_VERSION`
+  is plausible for a deployment to set for other reasons and would fail to
+  parse as a bool, stopping boot. `TestParseConfigIgnoresVersionEnv` guards it.
+- **Never add a `-db-dsn` flag back to the `run/api` or `run/seed` mise tasks.**
+  A flag outranks the environment, so it would silently ignore `.env` while the
+  `db/*` tasks still honoured it — you'd be inspecting a different database
+  from the one the server has open.
+- The `db/*` tasks expand `${GREENLIGHT_DB_DSN:-greenlight.db}` in the shell,
+  not via `{{ vars.x }}`. mise renders templates from the process environment
+  before `_.file = ".env"` is loaded, so a template silently misses `.env`.
+  (Also: `.env` beats the surrounding shell environment in mise.)
 
 ## Things worth knowing before touching SQL or migrations
 

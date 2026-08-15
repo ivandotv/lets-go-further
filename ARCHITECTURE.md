@@ -45,9 +45,11 @@ flows top to bottom; nothing skips a layer.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Two small supporting packages sit beside these: `internal/validator` (turns
-bad input into field-level error messages) and `internal/mailer` (sends the
-activation email).
+Three small supporting packages sit beside these: `internal/validator` (turns
+bad input into field-level error messages), `internal/mailer` (sends the
+activation email), and `internal/envflag` (lets every command-line flag fall
+back to a `GREENLIGHT_*` environment variable, so the same binary is
+configurable from a container).
 
 **Why this separation matters:** the model layer never imports `net/http`,
 and handlers never write raw SQL. You can unit-test business rules without a
@@ -239,8 +241,11 @@ run()                    returns an error instead of calling os.Exit —
   │                      os.Exit skips deferred calls, and this function
   │                      has one that matters (see below)
   │
-  ├─ flag.Parse()             → config struct: port, env, db dsn + pool,
+  ├─ parseConfig(os.Args[1:]) → config struct: port, env, db dsn + pool,
   │                             limiter, smtp, cors. Every knob, one place.
+  │                             Flags parse first; envflag.Apply then fills in
+  │                             whatever wasn't passed from GREENLIGHT_*.
+  │                             Precedence: flag > env > default.
   ├─ slog JSON handler        → structured logs on stdout
   ├─ db.OpenDB()              → SQLite pool; PRAGMAs ride in the DSN
   │    └─ defer database.Close()    ← the whole reason run() ≠ main()

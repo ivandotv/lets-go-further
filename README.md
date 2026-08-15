@@ -23,17 +23,18 @@ plain-text version.
 
 1. [Quickstart](#quickstart)
 2. [Running tasks](#running-tasks)
-3. [Trying it in Bruno](#trying-it-in-bruno)
-4. [API endpoints](#api-endpoints)
-5. [Project layout](#project-layout)
-6. [How a request flows through the app](#how-a-request-flows-through-the-app)
-7. [Startup, serving, and shutdown](#startup-serving-and-shutdown)
-8. [PostgreSQL → SQLite: every difference](#postgresql--sqlite-every-difference)
-9. [The packages, and why each one](#the-packages-and-why-each-one)
-10. [Design decisions worth understanding](#design-decisions-worth-understanding)
-11. [Testing](#testing)
-12. [Where this deviates from the books](#where-this-deviates-from-the-books)
-13. [Going further from here](#going-further-from-here)
+3. [Configuration](#configuration)
+4. [Trying it in Bruno](#trying-it-in-bruno)
+5. [API endpoints](#api-endpoints)
+6. [Project layout](#project-layout)
+7. [How a request flows through the app](#how-a-request-flows-through-the-app)
+8. [Startup, serving, and shutdown](#startup-serving-and-shutdown)
+9. [PostgreSQL → SQLite: every difference](#postgresql--sqlite-every-difference)
+10. [The packages, and why each one](#the-packages-and-why-each-one)
+11. [Design decisions worth understanding](#design-decisions-worth-understanding)
+12. [Testing](#testing)
+13. [Where this deviates from the books](#where-this-deviates-from-the-books)
+14. [Going further from here](#going-further-from-here)
 
 ---
 
@@ -145,15 +146,19 @@ mise run build/api      # build ./bin/api and ./bin/seed
 mise run build/linux    # cross-compile linux/amd64, CGO_ENABLED=0
 ```
 
-Three things worth knowing:
+Four things worth knowing:
 
 - **Variables are environment variables**, where the Makefile used `make x
-y=z`. Each has a default in `[vars]`:
+  y=z`. Each has a default in `[vars]`:
 
-                                        ```bash
-                                        db_dsn=/tmp/other.db mise run run/api
-                                        fuzztime=10s mise run test/fuzz
-                                        ```
+  ```bash
+  fuzztime=10s mise run test/fuzz
+  ```
+
+- **The application is configured through `.env`**, which mise loads into every
+  task. `cp .env.example .env` and edit. See
+  [Configuration](#configuration) below — including why
+  `run/api` deliberately passes no `-db-dsn` flag.
 
 - **Arguments are positional and validated.** `db/migrations/new` takes the
   migration name as a real argument, so `mise run db/migrations/new` with no
@@ -167,6 +172,104 @@ y=z`. Each has a default in `[vars]`:
 There's no `help` task: `mise tasks` already prints every task with its
 description, which is what the Makefile's hand-rolled `sed`/`column` help
 target existed to do.
+
+---
+
+## Configuration
+
+Every setting is a **command-line flag with an environment variable behind it**.
+Precedence runs:
+
+```
+command-line flag   >   environment variable   >   built-in default
+```
+
+which is the same order `docker`, `kubectl`, `git` and `psql` use, so there's no
+project-specific scheme to learn. The environment variable name is derived
+mechanically from the flag: upper-case it, turn dashes into underscores, prefix
+`GREENLIGHT_`. So `-smtp-password` reads `GREENLIGHT_SMTP_PASSWORD`, and
+`-db-max-open-conns` reads `GREENLIGHT_DB_MAX_OPEN_CONNS`.
+
+**`-help` is the reference**, not this README:
+
+```bash
+go run ./cmd/api -help
+```
+
+It prints every setting with its type, default and environment variable, and is
+generated from the flag definitions themselves — so unlike a hand-maintained
+list, it can't drift.
+
+### Locally: `.env`
+
+```bash
+cp .env.example .env    # then edit
+```
+
+mise loads `.env` into the environment of every task, so `mise run run/api`
+picks it up with nothing else to do. `.env` is gitignored. A missing `.env` is
+fine — the defaults are enough to run the whole project.
+
+You can still override one setting for a single run, because flags outrank the
+environment:
+
+```bash
+go run ./cmd/api -port=4001
+```
+
+### In a container: the same variables
+
+Nothing in the Go code knows about `.env`, or about mise — the binary reads
+plain environment variables. So the same names work unchanged wherever they come
+from:
+
+```yaml
+services:
+  api:
+    image: greenlight
+    env_file: .env                 # or environment:, or a Kubernetes Secret
+```
+
+This is the reason flags alone weren't enough. Docker's `env_file:`, Kubernetes
+`Secret`s and `ConfigMap`s all inject **environment variables**; none of them
+inject command-line arguments. Without env support, every deployment ends up
+with an entrypoint script that assembles an argv string out of env vars.
+
+### Why not drop the flags entirely, then?
+
+Because you'd lose `-help` as a live, always-correct catalogue of every setting,
+and you'd hand-write `strconv` parsing and error wrapping for the ten non-string
+settings — including a `time.Duration` and a `float64` — to replace code the
+`flag` package already provides. `-version` doesn't translate to an environment
+variable either. Keeping both costs one small package, `internal/envflag`.
+
+### The one sharp edge ⚠️
+
+**`mise run run/api` passes no `-db-dsn` flag, deliberately.** A flag outranks
+the environment, so hardcoding one in the task would silently ignore whatever
+`GREENLIGHT_DB_DSN` says in your `.env` — while `db/shell` and the migration
+tasks happily used the `.env` value. You'd be inspecting a different database
+from the one the server had open, with nothing to indicate it.
+
+For the same reason, the `db/*` tasks expand `${GREENLIGHT_DB_DSN:-greenlight.db}`
+in the **shell** rather than through a mise `{{ vars.x }}` template: mise renders
+its variables from the process environment, before `.env` has been loaded, so a
+template would quietly miss the value.
+
+Also worth knowing: **`.env` beats your shell environment.** Exporting
+`GREENLIGHT_DB_DSN` in your terminal will _not_ override a value set in `.env` —
+that's mise's precedence, not the application's.
+
+### Secrets
+
+Passing `-smtp-password` on the command line puts the credential in `ps aux`,
+where every user on the host can read it. Environment variables are only
+readable through `/proc/<pid>/environ`, which is owner-only. Use
+`GREENLIGHT_SMTP_PASSWORD` anywhere real.
+
+Leaving `GREENLIGHT_SMTP_HOST` unset is a supported mode, not an oversight: the
+application logs the email it would have sent, activation token included, so a
+fresh clone can register a user without any mail account at all.
 
 ---
 
@@ -246,7 +349,7 @@ key:
 .
 ├── cmd/
 │   ├── api/              The API server. Everything HTTP-specific lives here.
-│   │   ├── main.go       Config, flags, dependency wiring, expvar setup
+│   │   ├── main.go       Config (flags + env), dependency wiring, expvar setup
 │   │   ├── server.go     HTTP server + graceful shutdown
 │   │   ├── routes.go     Router and the middleware chain
 │   │   ├── auth.go / cors.go / logging.go / panic_recovery.go /
@@ -262,13 +365,15 @@ key:
 │   │                     that nothing outside can import it.
 │   ├── data/             The model layer: domain types + all the SQL
 │   ├── db/               Opening SQLite, and running migrations
+│   ├── envflag/          Lets flags fall back to environment variables
 │   ├── mailer/           SMTP + embedded HTML/text email templates
 │   ├── validator/        Collects validation errors into a map
 │   ├── assert/           Tiny test-assertion helpers (from book 1)
 │   └── testutil/         Builds a fresh migrated database per test
 │
 ├── migrations/           Versioned .sql schema, embedded into the binary
-├── mise.toml             Go version pin + every project task
+├── mise.toml             Go version pin, task definitions, .env loading
+├── .env.example          Template for the gitignored .env
 └── README.md
 ```
 
@@ -355,8 +460,10 @@ dropping work on the floor. Two files —
        └─ run()  ─── returns error; never calls os.Exit, because os.Exit
             │        would skip the defer three lines down
             │
-            ├─ flag.Parse()          config struct — port, env, db dsn + pool,
+            ├─ parseConfig(args)     config struct — port, env, db dsn + pool,
             │                        limiter, smtp, cors. Every knob, one place.
+            │                        Flags first, then envflag.Apply fills in
+            │                        anything not given from GREENLIGHT_*.
             ├─ slog JSON handler     structured logs on stdout
             ├─ db.OpenDB()           SQLite pool; PRAGMAs ride in the DSN
             │    └─ defer database.Close()      ← the reason run() ≠ main()
@@ -880,10 +987,10 @@ that aren't part of the module's dependencies. Unlike `golang-migrate`
 separate `go install` step needed. They're kept out of `audit`, which stays
 dependency-free.
 
-Current coverage: **`internal/validator` 100%, `internal/mailer` 93%,
-`internal/data` 91%, `internal/db` 84%, `cmd/api` 81%, `cmd/seed` 73%** —
-**84% across the module**. Most of what's left is `main`/`run`, which is process
-wiring.
+Current coverage: **`internal/validator` 100%, `internal/envflag` 100%,
+`internal/mailer` 93%, `internal/data` 91%, `cmd/api` 86%, `internal/db` 85%,
+`cmd/seed` 73%** — **87% across the module**. Most of what's left is
+`main`/`run`, which is process wiring.
 
 > **A note on measuring it.** `mise run test/cover` passes `-coverpkg=./...`. Without
 > it, `go test -cover` only instruments the package whose tests are running, so
@@ -1043,6 +1150,19 @@ Deliberate changes, all of them explained in comments at the site:
     `{id}`-style wildcards to `ServeMux` itself, making the third-party router
     unnecessary — see [Why `net/http.ServeMux` instead of
     `httprouter`?](#why-nethttpservemux-instead-of-julienschmidthttprouter).
+
+10. **Flags fall back to environment variables** (`internal/envflag`). The book
+    configures everything with flags, which is right for local development but
+    can't reach a container: Docker and Kubernetes inject env vars, never argv.
+    It also keeps the SMTP password out of `ps aux`. Flags still win over the
+    environment, so nothing from the book's usage changes — see
+    [Configuration](#configuration).
+
+        > This is deliberately *not* a config library. Viper drags in dozens of
+        > transitive dependencies, and even the lighter `kong` and `urfave/cli`
+        > do more than this project needs. The whole mechanism here is one
+        > `fs.Visit` loop that hands values straight back to the `flag` package
+        > for parsing — no new module dependency.
 
 ---
 
