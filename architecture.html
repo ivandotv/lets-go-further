@@ -603,6 +603,7 @@
         <div class="tree-row"><div class="tree-path">internal/</div><div class="tree-desc">Go-enforced private code — nothing outside the module can import it</div></div>
         <div class="tree-row sub"><div class="tree-path">data/</div><div class="tree-desc">model layer — domain types (Movie, User, Token…) and their SQL</div></div>
         <div class="tree-row sub"><div class="tree-path">db/</div><div class="tree-desc">storage layer — opens the SQLite connection pool, runs migrations</div></div>
+        <div class="tree-row sub"><div class="tree-path">envflag/</div><div class="tree-desc">lets every flag fall back to a <code>GREENLIGHT_*</code> environment variable</div></div>
         <div class="tree-row sub"><div class="tree-path">mailer/</div><div class="tree-desc">SMTP client + embedded email templates</div></div>
         <div class="tree-row sub"><div class="tree-path">validator/</div><div class="tree-desc">generic "collect field errors into a map" helper</div></div>
         <div class="tree-row sub"><div class="tree-path">assert/</div><div class="tree-desc">tiny generic assertion helpers used by every test</div></div>
@@ -610,8 +611,8 @@
         <div class="tree-row"><div class="tree-path">migrations/</div><div class="tree-desc">Versioned .sql schema files, embedded into the binary</div></div>
       </div>
       <div class="prose" style="margin-top:1.5rem;">
-        <p><strong>Why <code>cmd/</code> and <code>internal/</code>:</strong> this split isn't project-specific — it's standard Go project layout. <code>cmd/</code> holds <code>main</code> packages, one subdirectory per binary (<code>cmd/api</code> the server, <code>cmd/seed</code> the demo-data command). <code>internal/</code> is special to the toolchain itself: a package rooted under an <code>internal/</code> directory can only be imported by code rooted at that directory's parent — the compiler enforces it, not a convention people can ignore. That's why <code>data</code>, <code>db</code>, <code>mailer</code>, <code>validator</code>, and <code>testutil</code> all live there: none of them are meant to be imported from outside this module.</p>
-        <p><strong>Why <code>data/</code> and <code>db/</code> are split:</strong> keeping the model layer and storage layer as separate packages is what makes it physically impossible for <code>internal/data</code> to accidentally depend on <code>net/http</code>, and what lets <code>internal/db</code> be swapped or exercised in isolation (via <code>internal/testutil</code>) without touching a single query. <code>mailer</code>, <code>validator</code>, and <code>testutil</code> don't fit either layer — they're cross-cutting support code — but still need the same compiler-enforced privacy, so they sit beside <code>data</code>/<code>db</code> rather than in their own top-level directory.</p>
+        <p><strong>Why <code>cmd/</code> and <code>internal/</code>:</strong> this split isn't project-specific — it's standard Go project layout. <code>cmd/</code> holds <code>main</code> packages, one subdirectory per binary (<code>cmd/api</code> the server, <code>cmd/seed</code> the demo-data command). <code>internal/</code> is special to the toolchain itself: a package rooted under an <code>internal/</code> directory can only be imported by code rooted at that directory's parent — the compiler enforces it, not a convention people can ignore. That's why <code>data</code>, <code>db</code>, <code>envflag</code>, <code>mailer</code>, <code>validator</code>, and <code>testutil</code> all live there: none of them are meant to be imported from outside this module.</p>
+        <p><strong>Why <code>data/</code> and <code>db/</code> are split:</strong> keeping the model layer and storage layer as separate packages is what makes it physically impossible for <code>internal/data</code> to accidentally depend on <code>net/http</code>, and what lets <code>internal/db</code> be swapped or exercised in isolation (via <code>internal/testutil</code>) without touching a single query. <code>envflag</code>, <code>mailer</code>, <code>validator</code>, and <code>testutil</code> don't fit either layer — they're cross-cutting support code — but still need the same compiler-enforced privacy, so they sit beside <code>data</code>/<code>db</code> rather than in their own top-level directory.</p>
       </div>
     </section>
 
@@ -863,7 +864,7 @@
         <p><code>main()</code> does as little as possible — call <code>run()</code>, print whatever error comes back, exit. <code>run()</code> <em>returns</em> that error instead of calling <code>os.Exit</code>, because <code>os.Exit</code> skips deferred calls and this function has one that matters.</p>
       </div>
       <figure class="panel panel-scroll">
-        <svg viewBox="0 0 760 870" role="img" aria-label="Startup sequence drawn as seven numbered steps down a spine inside run(): parse flags into a config struct, build a slog JSON logger, open SQLite with db.OpenDB, apply embedded migrations with db.MigrateUp, publish expvar metrics, build the application struct holding the WaitGroup and shutdown channel, then call app.serve which blocks for the life of the process. Amber notes mark non-obvious behavior: where the deferred database close is registered and why, migration idempotency, lazy metric evaluation, and why the shutdown channel is initialized upfront rather than left nil." style="min-width:560px;">
+        <svg viewBox="0 0 760 870" role="img" aria-label="Startup sequence drawn as seven numbered steps down a spine inside run(): parse flags and GREENLIGHT_* environment variables into a config struct, build a slog JSON logger, open SQLite with db.OpenDB, apply embedded migrations with db.MigrateUp, publish expvar metrics, build the application struct holding the WaitGroup and shutdown channel, then call app.serve which blocks for the life of the process. Amber notes mark non-obvious behavior: where the deferred database close is registered and why, migration idempotency, lazy metric evaluation, and why the shutdown channel is initialized upfront rather than left nil." style="min-width:560px;">
           <defs>
             <marker id="ah7a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" class="dg-flow-fill"/>
@@ -882,11 +883,13 @@
           <!-- spine -->
           <line x1="260" y1="109" x2="260" y2="757" class="dg-line" stroke-dasharray="2 4"/>
 
-          <!-- 1 flag.Parse -->
+          <!-- 1 parseConfig -->
           <circle cx="260" cy="126" r="15" class="dg-num-circle"/><text x="260" y="130" text-anchor="middle" class="dg-num-text" font-size="12">1</text>
-          <text x="300" y="122" class="dg-text" font-size="14.5">flag.Parse()</text>
+          <text x="300" y="122" class="dg-text" font-size="14.5">parseConfig(os.Args[1:])</text>
           <text x="300" y="140" class="dg-text-sub" font-size="11.5">→ config struct: port, env, db, limiter, smtp, cors</text>
-          <line x1="260" y1="142" x2="260" y2="188" class="dg-flow" marker-end="url(#ah7a)"/>
+          <path d="M300,150 h380" class="dg-note-line"/>
+          <text x="300" y="166" class="dg-note" font-size="11">flags parse first, then GREENLIGHT_* fills the gaps — flag &gt; env &gt; default</text>
+          <line x1="260" y1="172" x2="260" y2="188" class="dg-flow" marker-end="url(#ah7a)"/>
 
           <!-- 2 slog -->
           <circle cx="260" cy="204" r="15" class="dg-num-circle"/><text x="260" y="208" text-anchor="middle" class="dg-num-text" font-size="12">2</text>
@@ -1140,7 +1143,7 @@
         </div>
       </div>
 
-      <div class="callout"><strong>Measuring coverage —</strong> <code>mise run test/cover</code> passes <code>-coverpkg=./...</code>. Without it <code>go test -cover</code> instruments only the package under test, and <code>internal/db</code> reads <strong>0%</strong> despite being exercised by nearly every test in the repo through <code>internal/testutil</code>. Current: <code>validator</code> 100%, <code>mailer</code> 93%, <code>data</code> 91%, <code>db</code> 84%, <code>cmd/api</code> 81%, <code>cmd/seed</code> 73% — <strong>84% module-wide</strong>, the remainder mostly <code>main</code>/<code>run</code> process wiring.</div>
+      <div class="callout"><strong>Measuring coverage —</strong> <code>mise run test/cover</code> passes <code>-coverpkg=./...</code>. Without it <code>go test -cover</code> instruments only the package under test, and <code>internal/db</code> reads <strong>0%</strong> despite being exercised by nearly every test in the repo through <code>internal/testutil</code>. Current: <code>validator</code> 100%, <code>envflag</code> 100%, <code>mailer</code> 93%, <code>data</code> 91%, <code>cmd/api</code> 86%, <code>db</code> 85%, <code>cmd/seed</code> 73% — <strong>87% module-wide</strong>, the remainder mostly <code>main</code>/<code>run</code> process wiring.</div>
     </section>
 
   </main>
