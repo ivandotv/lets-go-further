@@ -10,8 +10,8 @@ explaining _why_ it's there, not just what it does, and this README explains the
 architecture and every place where SQLite forced a change from the book.
 
 For a condensed, visual tour of the architecture, see the [rendered architecture
-overview][architecture-html] (or [ARCHITECTURE.md](ARCHITECTURE.md) for the
-plain-text version). And [click here for online version](https://github.com/ivandotv/lets-go-further/blob/main/architecture.html)
+overview](https://htmlpreview.github.io/?https://github.com/ivandotv/lets-go-further/blob/main/architecture.html) or [ARCHITECTURE.md](ARCHITECTURE.md) for the
+plain-text version.
 
 [letsgo]: https://lets-go.alexedwards.net/
 [further]: https://lets-go-further.alexedwards.net/
@@ -150,10 +150,10 @@ Three things worth knowing:
 - **Variables are environment variables**, where the Makefile used `make x
 y=z`. Each has a default in `[vars]`:
 
-                                ```bash
-                                db_dsn=/tmp/other.db mise run run/api
-                                fuzztime=10s mise run test/fuzz
-                                ```
+                                        ```bash
+                                        db_dsn=/tmp/other.db mise run run/api
+                                        fuzztime=10s mise run test/fuzz
+                                        ```
 
 - **Arguments are positional and validated.** `db/migrations/new` takes the
   migration name as a real argument, so `mise run db/migrations/new` with no
