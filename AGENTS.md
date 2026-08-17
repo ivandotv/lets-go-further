@@ -131,11 +131,13 @@ greenlight/internal/testutil`) before adding tests; don't re-derive it here.
   `assert.DeepEqual` for slices/maps/structs that `assert.Equal`'s `comparable`
   constraint can't take. Don't add testify — `internal/assert/assert.go`
   documents why this project hand-rolls its helpers instead.
-- Coverage baseline: `internal/validator` 100%, `internal/envflag` 100%,
-  `internal/mailer` 93%, `internal/data` 91%, `cmd/api` 86%, `internal/db` 85%,
-  `cmd/seed` 73%; **87% module-wide**. The rest is mostly `main`/`run` process wiring. Note
-  `mise run test/cover` uses `-coverpkg=./...` — without it `internal/db` reads 0%,
-  because it's exercised through `internal/testutil` from other packages.
+- Coverage runs **~87% module-wide** (`internal/validator`/`internal/envflag`
+  near 100%; the thin spots are mostly `main`/`run` process wiring). No CI
+  enforces this number, so treat it as a rough baseline rather than a gate —
+  run `mise run test/cover` for current, per-package numbers instead of
+  trusting a figure that can only get stale here. Note it uses
+  `-coverpkg=./...` — without that flag `internal/db` reads 0%, because it's
+  exercised through `internal/testutil` from other packages.
 - Beyond example-based tests there are **4 fuzz targets** (`Runtime.UnmarshalJSON`,
   `Genres.Scan`, `readJSON`, `EmailRX`), **concurrency tests** in
   `internal/data/concurrency_test.go` that guard `busy_timeout`/WAL/optimistic

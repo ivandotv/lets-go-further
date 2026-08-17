@@ -6,12 +6,11 @@
 //
 // # Running the tests
 //
-//	mise run test          # go test -race ./...      — the everyday command
-//	mise run test/short    # go test -short ./...     — skips anything touching a database
-//	mise run test/cover    # coverage, opens an HTML report in your browser
-//	mise run test/fuzz     # 30 seconds of fuzzing per target (4 targets, so ~2 min)
-//	mise run test/bench    # benchmarks, with allocation counts
-//	mise run audit         # tidy + fmt + vet + test -race — run before finishing a change
+// The full command reference — test, test/short, test/cover, test/fuzz,
+// test/bench, audit, and the rest — lives in AGENTS.md's Commands section, not
+// repeated here, so the two lists can't drift apart. Short version: `mise run
+// test` for the everyday run, `mise run test/short` to skip anything that
+// touches a database.
 //
 // To run one test, or a group, pass a regular expression to -run:
 //
