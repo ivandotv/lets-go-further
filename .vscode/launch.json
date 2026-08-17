@@ -1,0 +1,70 @@
+{
+    // Requires the golang.go extension (already recommended in extensions.json).
+    // It drives dlv under the hood; no manual dlv setup needed.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            // F5 with this selected: full API server, breakpoints work anywhere
+            // under cmd/api or internal/. Migrations run automatically on
+            // startup against greenlight.db in the workspace root, same as
+            // `mise run run/api`.
+            "name": "Debug api",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/api",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Debug seed",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/seed",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            // Debugs whichever _test.go file is focused in the editor: set a
+            // breakpoint, open the test file, select this config, hit F5.
+            // Equivalent to the CodeLens "debug test" link above each Test
+            // func, just bound to F5 instead of a click.
+            "name": "Debug current test file",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${fileDirname}",
+            "args": ["-test.run", "${input:testName}"]
+        },
+        {
+            // Debugs every test in the current package, no filtering.
+            "name": "Debug current package tests",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${fileDirname}"
+        },
+        {
+            // Attaches to an already-running api process instead of launching
+            // a new one. Useful when the server is already up via `mise run
+            // run/api` and you don't want to restart it to add a breakpoint.
+            // Note: `go run` execs a compiled temp binary as a child process,
+            // so pick that child in the process list, not `go run` itself —
+            // `lsof -i :4000 -sTCP:LISTEN` finds its PID if the picker is
+            // ambiguous. Detaching (Shift+F5) leaves the process running,
+            // unlike the launch configs above which kill it on stop.
+            "name": "Attach to running api",
+            "type": "go",
+            "request": "attach",
+            "mode": "local",
+            "processId": "${command:pickProcess}"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testName",
+            "type": "promptString",
+            "description": "Test function name (regex, matches go test -run)",
+            "default": ".*"
+        }
+    ]
+}

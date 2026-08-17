@@ -24,13 +24,5 @@ coverage.html
 # Editor and OS noise
 .DS_Store
 .idea/
-# .vscode is ignored wholesale except for the two files that are project
-# config rather than personal preference: the extension recommendations, and
-# settings that mirror mise.toml (golangci-lint as the linter, -race on tests,
-# and the toolsManagement guard that stops the Go extension installing its own
-# copies of the CLIs pinned in [tools]).
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
 *.swp
 /questions.md
