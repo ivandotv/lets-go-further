@@ -121,6 +121,7 @@ Task names are unchanged from the old Makefile, so `make test/cover` is now
 
 ```bash
 mise run run/api        # run the API server (auto-migrates on startup)
+mise run run/api/watch  # same, but rebuild and restart whenever a file changes
 mise run run/seed       # seed a demo user + movies, print an auth token
 
 mise run test           # everything, with the race detector
@@ -146,7 +147,7 @@ mise run build/api      # build ./bin/api and ./bin/seed
 mise run build/linux    # cross-compile linux/amd64, CGO_ENABLED=0
 ```
 
-Four things worth knowing:
+Five things worth knowing:
 
 - **Variables are environment variables**, where the Makefile used `make x
   y=z`. Each has a default in `[vars]`:
@@ -168,6 +169,26 @@ Four things worth knowing:
 - **Destructive tasks prompt.** `db/reset` and `db/migrations/down` use mise's
   `confirm`, which requires a real terminal — piping `y` into it won't work.
   In a script, use `mise run --yes db/reset`.
+
+- **`run/api/watch` is live reload**, for anyone arriving from a
+  `nodemon`-shaped workflow. Go has no hot module replacement: the server is
+  rebuilt and restarted, which is what `nodemon` does too. A warm incremental
+  rebuild of `./cmd/api` measures well under a second, so the loop feels the
+  same.
+
+  It's `mise watch` (backed by [watchexec](https://watchexec.github.io/),
+  installed automatically from `[tools]`) rather than the more common
+  [air](https://github.com/air-verse/air) or
+  [wgo](https://github.com/bokwoon95/wgo) for one reason: those build and exec
+  the binary themselves, bypassing mise, so they would miss both `.env` and the
+  Go version pinned in `[tools]`. `mise watch` re-runs the `run/api` task, so
+  the watched server is configured and compiled identically to the unwatched
+  one — see the comment on the task in `mise.toml` for the full reasoning.
+
+  Each restart prints `ERROR sh exited with non-zero status` followed by
+  `task failed`. That's cosmetic: mise reports the task shell as failed
+  because watchexec signalled it, while the server's own `stopped server` log
+  line, printed just above, shows the graceful shutdown ran normally.
 
 There's no `help` task: `mise tasks` already prints every task with its
 description, which is what the Makefile's hand-rolled `sed`/`column` help

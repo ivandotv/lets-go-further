@@ -43,6 +43,11 @@ golangci-lint = "2.12.2"
 gotestsum = "1.13.0"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.6.0"
 
+# Used by run/api/watch (mise watch shells out to it). Pinned like the rest so
+# `mise install` fetches it and nobody has to discover the dependency by
+# reading an error message.
+watchexec = "2.5.1"
+
 # Also pinned, for an extra reason: x/perf has no tagged releases, so
 # "latest" would mean "whatever commit is newest right now" via a
 # pseudo-version — and it also trips mise's minimum_release_age check on
@@ -100,6 +105,50 @@ description = "run the API server"
 # default) and silently ignore whatever .env said — the least debuggable
 # failure mode this design has.
 run = "go run ./cmd/api"
+
+[tasks."run/api/watch"]
+description = "run the API server, restarting on source changes"
+# Live reload, the Go way: there is no HMR — the server is rebuilt and
+# restarted, exactly like nodemon. A warm incremental rebuild of ./cmd/api is
+# well under a second, which is what makes this practical.
+#
+# This wraps `run/api` rather than repeating `go run ./cmd/api`, and that is
+# the whole reason it uses `mise watch` instead of air or wgo. Those tools
+# build and exec the binary themselves, so they would bypass mise entirely —
+# missing the .env file loaded by [env] above (leaving GREENLIGHT_DB_DSN at
+# its default, pointed at a different database from the one db/shell opens)
+# and missing the Go version pinned in [tools] (building with whatever `go`
+# happens to be on PATH). Going through the task means neither can drift.
+#
+#   -r          restart the server on change. The default is 'do-nothing',
+#               which ignores events while the command is still running — for
+#               a long-lived server that means it would never restart at all.
+#   --exts      .sql is in here because the migrations are go:embed-ed, so a
+#               schema edit only takes effect after a rebuild.
+#
+# Two watchexec defaults do useful work here and are deliberately left alone:
+#
+#   - It reads .gitignore, so *.db / *.db-wal / *.db-shm are already excluded.
+#     That matters more than it looks: WAL journalling writes those constantly
+#     while the server runs, so without the exclusion the server would restart
+#     itself in a loop, forever, because it wrote to disk.
+#   - Restart sends SIGTERM and waits up to 10s (--stop-signal/--stop-timeout),
+#     so serve()'s graceful shutdown drains in-flight requests and closes the
+#     database cleanly instead of leaving a stale -wal behind.
+#
+# Debounce defaults to 50ms — enough to coalesce the several filesystem events
+# one editor save emits, and to avoid building a half-written file. Raise it
+# with -d 200ms if format-on-save triggers duplicate rebuilds.
+#
+# Cosmetic wart, not a bug: each restart prints two lines,
+#
+#   [run/api] ERROR sh exited with non-zero status: no exit status
+#   [run/api] ERROR task failed
+#
+# That is mise reporting the task shell as failed because watchexec terminated
+# it with a signal. The server itself shut down cleanly — the "stopped server"
+# log line immediately above proves it. Nothing to fix; don't chase it.
+run = "mise watch -r --exts go,sql run/api"
 
 [tasks."run/seed"]
 description = "create a demo user with sample data and print an auth token"

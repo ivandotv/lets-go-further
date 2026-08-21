@@ -31,6 +31,7 @@ every command is `mise run <name>`.
 ```bash
 mise run run/seed       # create+migrate greenlight.db, seed demo user/movies, print an auth token
 mise run run/api        # run the API server (auto-migrates on startup)
+mise run run/api/watch  # same, rebuilt and restarted on every .go/.sql change
 
 mise run test           # go test -race ./...
 mise run test/short     # skip database-backed tests (go test -short)
@@ -45,9 +46,10 @@ mise run vuln           # govulncheck against the Go vulnerability database
 
 # test/summary, test/bench/compare, lint, and vuln each wrap a third-party CLI
 # (gotestsum, benchstat, golangci-lint, govulncheck) that isn't a module
-# dependency. Unlike golang-migrate below (manual install), these four are in
-# mise.toml's [tools], so `mise install` fetches them automatically. Not part
-# of `audit`, which stays dependency-free on purpose.
+# dependency; run/api/watch wraps a fifth, watchexec. Unlike golang-migrate
+# below (manual install), all five are in mise.toml's [tools], so `mise install`
+# fetches them automatically. None are part of `audit`, which stays
+# dependency-free on purpose.
 
 # Single test:
 go test ./internal/data/ -run TestMovieModel_Insert -v
@@ -173,6 +175,11 @@ turned to underscores and a `GREENLIGHT_` prefix (`-smtp-password` →
   A flag outranks the environment, so it would silently ignore `.env` while the
   `db/*` tasks still honoured it — you'd be inspecting a different database
   from the one the server has open.
+- **`run/api/watch` wraps the `run/api` task, not `go run` directly.** This is
+  the same hazard in a different disguise: `air` and `wgo` build and exec the
+  binary themselves, so a watcher invoked outside mise gets neither `.env` nor
+  the Go version pinned in `[tools]`. Don't "simplify" the task by inlining
+  the `go run` command.
 - The `db/*` tasks expand `${GREENLIGHT_DB_DSN:-greenlight.db}` in the shell,
   not via `{{ vars.x }}`. mise renders templates from the process environment
   before `_.file = ".env"` is loaded, so a template silently misses `.env`.
